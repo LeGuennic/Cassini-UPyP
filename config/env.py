@@ -1,6 +1,6 @@
 # PATH CONFIGURATION
 #-------------------
-
+# TESTESTESTEST
 calibration_dir = '/home/aodren/CNRS/Software/Cassini-UPyP/resources/calibration_files'
 stars_dir       = '/home/aodren/CNRS/Software/Cassini-UPyP/resources'
 
