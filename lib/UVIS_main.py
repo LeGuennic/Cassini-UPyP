@@ -1527,7 +1527,7 @@ class UVIS_Observation:
             self.calibration_error[i] = cal['calibration_error']
         self.calibration_set = True
 
-    def calibrate(self, wl_interp='pchip', nan_interp='linear', nan_mode='2D', flat_field=True, smooth=True, extrapolate=False) :
+    def calibrate(self, wl_interp='pchip', nan_interp='linear', flat_field=True, smooth=True, extrapolate=False) :
         """
         Calibrate the raw data to obtain radiance and sets class attributes.
 
@@ -1554,9 +1554,9 @@ class UVIS_Observation:
 
         for i in range(self.n_pics) :
             print(self.cps_bg_removed[i].shape)
-            self.data[i]            = interpolate_nans(self.cps_bg_removed[i] * self.calibration[i], method=nan_interp, mode=nan_mode, extrapolate=extrapolate)
-            self.uncertainty_sup[i] = interpolate_nans(self.uncertainty_sup[i], method=nan_interp, mode=nan_mode, extrapolate=extrapolate)
-            self.uncertainty_inf[i] = interpolate_nans(self.uncertainty_inf[i], method=nan_interp, mode=nan_mode, extrapolate=extrapolate)
+            self.data[i]            = interpolate_nans(self.cps_bg_removed[i] * self.calibration[i], method=nan_interp, extrapolate=extrapolate)
+            self.uncertainty_sup[i] = interpolate_nans(self.uncertainty_sup[i], method=nan_interp, extrapolate=extrapolate)
+            self.uncertainty_inf[i] = interpolate_nans(self.uncertainty_inf[i], method=nan_interp, extrapolate=extrapolate)
         
         if smooth : self.smooth(force=True)
         self.is_calibrated = True
