@@ -10,10 +10,10 @@ import warnings
 from pathlib import Path
 from scipy.constants import astronomical_unit
 
-from lib.kernellib import *
-from lib.UVIS_main import UVIS_Observation
-import config.env as env
-import config.plotting
+from Cassini_UPyP.lib.kernellib import *
+from Cassini_UPyP.lib.UVIS_main import UVIS_Observation
+import Cassini_UPyP.config.env as env
+import Cassini_UPyP.config.plotting as plotconfig
 from time import time
 
 
@@ -51,7 +51,7 @@ def stars_pickles() :
 def plot_stars(stars_pickles, ax=None):
     if ax is None : ax=plt.gca()
 
-    ax.plot(stars_pickles()['tyRA'],stars_pickles()['tyDE'], **config.plotting.STAR_STYLE)
+    ax.plot(stars_pickles()['tyRA'],stars_pickles()['tyDE'], **plotconfig.STAR_STYLE)
 
 
 # Pixels FOV
@@ -733,7 +733,7 @@ def max_angular_diameter(points):
 
 class geometry:
     def __init__(self, ET:float,
-                 meta_kernel = None, other_bodies=config.plotting.FOV_objects,
+                 meta_kernel = None, other_bodies=plotconfig.FOV_objects,
                  main=None, u:"UVIS_Observation"=None, target=None, offset=np.array((0,0,0))):
 
         self.ET   = ET
@@ -886,7 +886,7 @@ class geometry:
 
             # Longitude and latitude lines
             self.lon_lines   , self.lat_lines   = [],[]
-            for lon in config.plotting.lon_line_grid :
+            for lon in plotconfig.lon_line_grid :
                 lon_line = self.geo_engine.get_lon_line(np.radians(lon))
 
                 self.lon_lines.append({
@@ -894,7 +894,7 @@ class geometry:
                     'RADEC' : xyz2radec(lon_line, units='degrees')
                 })
 
-            for lat in config.plotting.lat_line_grid :
+            for lat in plotconfig.lat_line_grid :
                 lat_line = self.geo_engine.get_lat_line(np.radians(lat))
 
                 self.lat_lines.append({
@@ -1145,7 +1145,7 @@ class geometry:
 
 
         if self.main :
-            self.stars_orf    = list(xyz2radec(self.stars['XYZ']   @ self.R.T, units=units, ra_range=ra_range))
+            self.stars_orf    = xyz2radec(self.stars['XYZ']   @ self.R.T, units=units, ra_range=ra_range)
             # self.UV_stars_orf = list(xyz2radec(np.array(stars_UV     ['XYZ'].tolist())    @ self.R.T, units=units, ra_range=ra_range))
 
             # Longitude and latitude lines
@@ -1222,7 +1222,7 @@ class geometry:
 
         
             fig, ax = plt.subplots()
-            ax.set_facecolor(config.plotting.BACKGROUND_COLOR)
+            ax.set_facecolor(plotconfig.BACKGROUND_COLOR)
             ax.set_aspect('equal')
 
             xmin,xmax = RA_range
@@ -1230,10 +1230,10 @@ class geometry:
             ax.set_xlim(xmin,xmax)
             ax.set_ylim(ymin,ymax)
 
-        if self.target in config.plotting.PLANET_STYLE :
-            planet_style = config.plotting.PLANET_STYLE[self.target]
+        if self.target in plotconfig.PLANET_STYLE :
+            planet_style = plotconfig.PLANET_STYLE[self.target]
         else :
-            planet_style = config.plotting.PLANET_STYLE['DEFAULT']
+            planet_style = plotconfig.PLANET_STYLE['DEFAULT']
 
         # Target limb + day side
         ax.fill(
@@ -1265,20 +1265,20 @@ class geometry:
             if frame=='ORF' :
                 # RA / DEC background lines
                 ax.plot(self.radec_lines[frame][:, 0], self.radec_lines[frame][:, 1],
-                        **config.plotting.RADEC_LINES)
+                        **plotconfig.RADEC_LINES)
 
 
                 # Background stars
                 stars_orf = np.array(self.stars_orf)
                 stars_orf = stars_orf[is_in_frame(stars_orf, RA_range, DEC_range)]
-                ax.plot(stars_orf[:,0],stars_orf[:,1], **config.plotting.STAR_STYLE)
+                ax.plot(stars_orf[:,0],stars_orf[:,1], **plotconfig.STAR_STYLE)
 
                 # UV_stars_orf = np.array(self.UV_stars_orf)
                 # UV_stars_orf = UV_stars_orf[is_in_frame(UV_stars_orf, RA_range, DEC_range)]
-                # ax.plot(UV_stars_orf[:,0],UV_stars_orf[:,1], **config.plotting.UV_STAR_STYLE)
+                # ax.plot(UV_stars_orf[:,0],UV_stars_orf[:,1], **plotconfig.UV_STAR_STYLE)
 
             else :
-                ax.plot(self.stars['RA_cor'],self.stars['DEC_cor'], **config.plotting.STAR_STYLE)
+                ax.plot(self.stars['RA_cor'],self.stars['DEC_cor'], **plotconfig.STAR_STYLE)
                 # plot_UV_stars(stars_UV,      ax=ax)
 
             # OTHER BODIES IN THE SKY
@@ -1287,17 +1287,17 @@ class geometry:
                 if mode!='allsky' : t2.rotate(view_center=self.orf_center, units = self.rotate_units)
                 
                 if np.any(is_in_frame(t2.target_limb[frame], (xmin, xmax), (ymin, ymax))) :
-                    plt.annotate( t2.target,
+                    ax.annotate( t2.target,
                          (t2.target_center[frame][0], t2.target_center[frame][1]),
                          color='white', textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10, zorder=t2.zorder)
                     
                     if t2.angular_diameter < 2 :
-                        if t2.target in config.plotting.PLANET_STYLE :
-                            plt.plot([t2.target_center[frame][0]], [t2.target_center[frame][1]],
-                                    ls='', marker='o', ms = 5, color=config.plotting.PLANET_STYLE[t2.target]['limb']['color'], zorder=t2.zorder)
+                        if t2.target in plotconfig.PLANET_STYLE :
+                            ax.plot([t2.target_center[frame][0]], [t2.target_center[frame][1]],
+                                    ls='', marker='o', ms = 5, color=plotconfig.PLANET_STYLE[t2.target]['limb']['color'], zorder=t2.zorder)
                         else :
-                            plt.plot([t2.target_center[frame][0]], [t2.target_center[frame][1]],
-                                    ls='', marker='o', ms = 5, color=config.plotting.PLANET_STYLE['DEFAULT']['limb']['color'], zorder=t2.zorder)
+                            ax.plot([t2.target_center[frame][0]], [t2.target_center[frame][1]],
+                                    ls='', marker='o', ms = 5, color=plotconfig.PLANET_STYLE['DEFAULT']['limb']['color'], zorder=t2.zorder)
 
                         continue
                     else : t2.plot(mode=mode, ax=ax)
@@ -1308,7 +1308,7 @@ class geometry:
                 ax.plot(
                     lon_line[frame][:,0],
                     lon_line[frame][:,1],
-                    **config.plotting.LATLON_GRID,
+                    **plotconfig.LATLON_GRID,
                 )
 
 
@@ -1316,7 +1316,7 @@ class geometry:
                 ax.plot(
                     lat_line[frame][:,0],
                     lat_line[frame][:,1],
-                    **config.plotting.LATLON_GRID,
+                    **plotconfig.LATLON_GRID,
                 )
 
             # PIXELS
@@ -1328,10 +1328,10 @@ class geometry:
                         ax=ax, linewidth=2, color='red', ls='-', marker='', zorder = 20)
 
             # TARGET CENTER
-            plt.plot([self.target_center[frame][0]], [self.target_center[frame][1]], **config.plotting.TARGET_CENTER)
+            ax.plot([self.target_center[frame][0]], [self.target_center[frame][1]], **plotconfig.TARGET_CENTER)
 
             # SUB-SPACECRAFT LATITUDE AND LONGITUDE
-            plt.annotate(f"{round(self.sub_sc_lon)}° , {round(self.sub_sc_lat)}°",
+            ax.annotate(f"{round(self.sub_sc_lon)}° , {round(self.sub_sc_lat)}°",
                         (self.target_center[frame][0], self.target_center[frame][1]), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=8)
 
             # PIXEL PARAMETERS (LOS PROPERTIES)
@@ -1349,74 +1349,74 @@ class geometry:
             if show :
                 plt.show(block=False)
             if save :
-                plt.savefig(savename)
+                fig.savefig(savename)
                 plt.close(fig)
-            if not show : return fig
+            # if not show : return fig
         
 
-    def plot3D(self, ax=None, target_center=(0,0,0)):
-        if ax is None :
+    # def plot3D(self, ax=None, target_center=(0,0,0)):
+    #     if ax is None :
                     
-            fig = plt.figure()
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_aspect('equal')
-            ax.set_facecolor('black')
-            ax.set_axis_off()
+    #         fig = plt.figure()
+    #         ax = fig.add_subplot(111, projection='3d')
+    #         ax.set_aspect('equal')
+    #         ax.set_facecolor('black')
+    #         ax.set_axis_off()
 
 
-        # Rayons de l'ellipsoïde
-        a, b, c = self.target_radius
+    #     # Rayons de l'ellipsoïde
+    #     a, b, c = self.target_radius
 
-        # Générer les angles theta (longitude) et phi (latitude)
-        theta      = np.linspace(0, 2 * np.pi, 100)  # Longitude
-        phi        = np.linspace(0, np.pi, 50)         # Latitude
-        theta, phi = np.meshgrid(theta, phi)
+    #     # Générer les angles theta (longitude) et phi (latitude)
+    #     theta      = np.linspace(0, 2 * np.pi, 100)  # Longitude
+    #     phi        = np.linspace(0, np.pi, 50)         # Latitude
+    #     theta, phi = np.meshgrid(theta, phi)
 
-        # Coordonnées cartésiennes des points sur l'ellipsoïde
-        x = a * np.sin(phi) * np.cos(theta) + target_center[0]
-        y = b * np.sin(phi) * np.sin(theta) + target_center[1]
-        z = c * np.cos(phi)                 + target_center[2]
+    #     # Coordonnées cartésiennes des points sur l'ellipsoïde
+    #     x = a * np.sin(phi) * np.cos(theta) + target_center[0]
+    #     y = b * np.sin(phi) * np.sin(theta) + target_center[1]
+    #     z = c * np.cos(phi)                 + target_center[2]
 
-        # Tracer la surface
-        ax.plot_surface(x, y, z, alpha=1, color=planet_style['limb']['color'])
-        if self.target!='SUN' :
-            full_term = self.geo_engine.get_terminator(full=True) - self.geo_engine.planet_from_obs_j2k+ target_center
-            ax.plot(full_term[:,0], full_term[:,1], full_term[:,2],
-                  color='black')
+    #     # Tracer la surface
+    #     ax.plot_surface(x, y, z, alpha=1, color=planet_style['limb']['color'])
+    #     if self.target!='SUN' :
+    #         full_term = self.geo_engine.get_terminator(full=True) - self.geo_engine.planet_from_obs_j2k+ target_center
+    #         ax.plot(full_term[:,0], full_term[:,1], full_term[:,2],
+    #               color='black')
 
-        if self.main :
-            obs_vect = -self.geo_engine.planet_from_obs_j2k/0.5
-            ax.quiver(0, 0, 0, obs_vect[0], obs_vect[1], obs_vect[2],
-                    color='b', arrow_length_ratio=0.1)
+    #     if self.main :
+    #         obs_vect = -self.geo_engine.planet_from_obs_j2k/0.5
+    #         ax.quiver(0, 0, 0, obs_vect[0], obs_vect[1], obs_vect[2],
+    #                 color='b', arrow_length_ratio=0.1)
             
-            sun_vect = (self.geo_engine.sun_from_obs_j2k-self.geo_engine.planet_from_obs_j2k)/2.e3
-            ax.quiver(0, 0, 0, sun_vect[0], sun_vect[1], sun_vect[2],
-                    color='gold', arrow_length_ratio=0.1)
+    #         sun_vect = (self.geo_engine.sun_from_obs_j2k-self.geo_engine.planet_from_obs_j2k)/2.e3
+    #         ax.quiver(0, 0, 0, sun_vect[0], sun_vect[1], sun_vect[2],
+    #                 color='gold', arrow_length_ratio=0.1)
             
-            stars=stars_pickles[stars_pickles['fBt']<6]
-            stars=np.array(stars['XYZ'].to_list())
-            # uv_stars=np.array(stars_UV['XYZ'].to_list())
-            ax.plot(stars[:,0],stars[:,1],stars[:,2], ls='', marker='.',color='white',ms=5)
-            # ax.plot(uv_stars[:,0],uv_stars[:,1],uv_stars[:,2], ls='', marker='.',color='purple',ms=2)
+    #         stars=stars_pickles[stars_pickles['fBt']<6]
+    #         stars=np.array(stars['XYZ'].to_list())
+    #         # uv_stars=np.array(stars_UV['XYZ'].to_list())
+    #         ax.plot(stars[:,0],stars[:,1],stars[:,2], ls='', marker='.',color='white',ms=5)
+    #         # ax.plot(uv_stars[:,0],uv_stars[:,1],uv_stars[:,2], ls='', marker='.',color='purple',ms=2)
 
-            ax.plot(self.radec_lines['XYZ'][:, 0]*1.e10, self.radec_lines['XYZ'][:, 1]*1.e10,self.radec_lines['XYZ'][:, 2]*1.e10,
-                           color='#3A3939', marker='.', ls='',ms=2)
+    #         ax.plot(self.radec_lines['XYZ'][:, 0]*1.e10, self.radec_lines['XYZ'][:, 1]*1.e10,self.radec_lines['XYZ'][:, 2]*1.e10,
+    #                        color='#3A3939', marker='.', ls='',ms=2)
 
-            for t2 in self.other_targets:
+    #         for t2 in self.other_targets:
 
                 
-                # plt.annotate( t2.target,
-                #         (t2.target_center[frame][0], t2.target_center[frame][1]),
-                #         color='white', textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10, zorder=t2.zorder)
-                # if t2.target!='SUN' :
-                t2.plot3D(ax=ax,
-                            target_center= t2.geo_engine.planet_from_obs_j2k - self.geo_engine.planet_from_obs_j2k)
+    #             # plt.annotate( t2.target,
+    #             #         (t2.target_center[frame][0], t2.target_center[frame][1]),
+    #             #         color='white', textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10, zorder=t2.zorder)
+    #             # if t2.target!='SUN' :
+    #             t2.plot3D(ax=ax,
+    #                         target_center= t2.geo_engine.planet_from_obs_j2k - self.geo_engine.planet_from_obs_j2k)
 
-        ax.set_xlim([-1.e5, 1.e5])
-        ax.set_ylim([-1.e5, 1.e5])
-        ax.set_zlim([-1.e5, 1.e5])
-        ax.set_aspect('equal', adjustable='datalim')
-        plt.show()
+    #     ax.set_xlim([-1.e5, 1.e5])
+    #     ax.set_ylim([-1.e5, 1.e5])
+    #     ax.set_zlim([-1.e5, 1.e5])
+    #     ax.set_aspect('equal', adjustable='datalim')
+    #     plt.show()
 
 
 

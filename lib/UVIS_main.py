@@ -29,13 +29,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Code libraries
-from lib.UVIS_background import bg_fit, do_bg_fit
-from lib.utils import *
+from Cassini_UPyP.lib.UVIS_background import bg_fit, do_bg_fit
+from Cassini_UPyP.lib.utils import *
 
-from config.uvis              import *
-from config.pipeline_defaults import *
+from Cassini_UPyP.config.uvis              import *
+from Cassini_UPyP.config.pipeline_defaults import *
 
-import config.env as env
+import Cassini_UPyP.config.env as env
 
 import scipy.ndimage as ndi
 
@@ -92,7 +92,6 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
     wl = np.asarray(wl)
     s  = np.asarray(s)
 
-    print(s.shape)
     if wl.size != s.shape[axis]:
         raise ValueError("The wavelength and spectrum arrays must have the same shape.")
     
@@ -167,10 +166,10 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
             new_shape[axis] = delta_wl.shape[0]
             delta_wl_expanded = delta_wl.reshape(new_shape)
             
-            # For each segment, variance_seg = (Δwl/2)^2*(s_left^2 + s_right^2)
+            # For each segment, variance_seg = (Δwl/2)^2*(s_i^2 + s_(i+1)^2)
             integral = np.sqrt(np.sum((0.5 * delta_wl_expanded)**2 * (s_left**2 + s_right**2), axis=axis))
     else:
-        raise ValueError("Method must be either 'simpson' or 'trapz'.")
+        raise ValueError("Method must be either 'simpson' or 'trapezoid'.")
 
     return integral
 
@@ -684,7 +683,7 @@ class UVIS_bin:
         out_shape = bin_shape + self.WL.shape
 
         self.bin_mean_data       = np.full(out_shape, np.nan, dtype=float)
-        self.bin_stddev          = np.full(out_shape, np.nan, dtype=float)
+        self.bin_stddev_spectrum = np.full(out_shape, np.nan, dtype=float)
         self.bin_mean_data_w     = np.full(out_shape, np.nan, dtype=float)
         self.bin_uncertainty_sup = np.full(out_shape, np.nan, dtype=float)
         self.bin_uncertainty_inf = np.full(out_shape, np.nan, dtype=float)
@@ -700,8 +699,8 @@ class UVIS_bin:
             stacked_inf  = np.array([self.uncertainty_inf[i, j, :] for (i, j) in pairs])
 
             # 2) Unweighted mean & std
-            self.bin_mean_data[idx] = stacked_data.mean(axis=0)
-            self.bin_stddev[idx]    = stacked_data.std (axis=0)   # e.g. unbiased std
+            self.bin_mean_data[idx]       = stacked_data.mean(axis=0)
+            self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0)   # e.g. unbiased std
 
             # 3) Weighted mean using combined uncertainty = (sup + inf)/2
             combined_unc = 0.5 * (stacked_sup + stacked_inf)
@@ -721,7 +720,7 @@ class UVIS_bin:
             sum_inv_sup_sq = inv_sup_sq.sum(axis=0)
             sum_inv_inf_sq = inv_inf_sq.sum(axis=0)
 
-            # sqrt(1 / sum(1/unc^2)) for each spectral channel
+            # sqrt(1 / sum(1/unc^2))
             self.bin_uncertainty_sup[idx] = np.sqrt(
                 np.divide(1.0, sum_inv_sup_sq,
                           out=np.full(self.WL.shape, np.nan), where=(sum_inv_sup_sq>0))
@@ -731,27 +730,43 @@ class UVIS_bin:
                           out=np.full(self.WL.shape, np.nan), where=(sum_inv_inf_sq>0))
                 )
             
-        self.bin_set = True
+        self.bin_averaged = True
 
-    def integrate(self, wl_range=(1600,1900), uncertainty=False):
+    def integrate(self, wl_range=(1600,1900), uncertainty=True, method='simpson'):
 
-        integrated_data = integrate_spectrum(self.WL, self.data, wl_range=wl_range, axis=-1)
+        self.integrated_data = integrate_spectrum(self.WL, self.data, wl_range=wl_range, axis=-1)
+        self.integrated_uncertainty_inf = integrate_spectrum(self.WL, self.uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
+        self.integrated_uncertainty_sup = integrate_spectrum(self.WL, self.uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
 
-        integrated_bin_data            = integrate_spectrum(self.WL, self.bin_mean_data,   wl_range=wl_range, axis=-1)
-        integrated_bin_data_w          = integrate_spectrum(self.WL, self.bin_mean_data_w, wl_range=wl_range, axis=-1)
 
-        integrated_bin_stddev          = integrate_spectrum(self.WL, self.bin_stddev, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
-        integrated_bin_uncertainty_sup = integrate_spectrum(self.WL, self.bin_uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
-        integrated_bin_uncertainty_inf = integrate_spectrum(self.WL, self.bin_uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
+        # Average integrated arrays
+        self.binned_integrated_data            = np.full(self.bins.shape, np.nan, dtype=float)
+        self.binned_integrated_uncertainty_sup = np.full(self.bins.shape, np.nan, dtype=float)
+        self.binned_integrated_uncertainty_inf = np.full(self.bins.shape, np.nan, dtype=float)
+        self.bin_stddev                        = np.full(self.bins.shape, np.nan, dtype=float)
 
-        self.__setattr__('integrated_data',                integrated_data)
+        for idx in np.ndindex(self.bins.shape):
+            
+            pairs = self.bins[idx]
+            if not pairs:  continue
 
-        self.__setattr__('integrated_bin_data',            integrated_bin_data)
-        self.__setattr__('integrated_bin_data_w',          integrated_bin_data_w)
+            self.binned_integrated_data[idx] = np.mean([self.integrated_data[i, j] for (i, j) in pairs])
+            self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs])
 
-        self.__setattr__('integrated_bin_stddev',          integrated_bin_stddev)
-        self.__setattr__('integrated_bin_uncertainty_sup', integrated_bin_uncertainty_sup)
-        self.__setattr__('integrated_bin_uncertainty_inf', integrated_bin_uncertainty_inf)
+            self.binned_integrated_uncertainty_sup[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_sup[i, j]**2 for (i, j) in pairs]))
+            self.binned_integrated_uncertainty_inf[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_inf[i, j]**2 for (i, j) in pairs]))
+
+        self.bin_integrated = True
+
+
+        # Integrate bin-averaged arrays
+        if self.bin_averaged:
+            self.integrated_bin_data            = integrate_spectrum(self.WL, self.bin_mean_data,   wl_range=wl_range, axis=-1, method=method)
+            self.integrated_bin_data_w          = integrate_spectrum(self.WL, self.bin_mean_data_w, wl_range=wl_range, axis=-1, method=method)
+
+            self.integrated_bin_stddev          = integrate_spectrum(self.WL, self.bin_stddev_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_bin_uncertainty_sup = integrate_spectrum(self.WL, self.bin_uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_bin_uncertainty_inf = integrate_spectrum(self.WL, self.bin_uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
 
 
     def plot_bin(self):
@@ -783,6 +798,44 @@ class UVIS_bin:
         plt.tight_layout()
         plt.show()
 
+
+
+    def __repr__(self):
+        info = f"<UVIS_bin object>\n"
+        info += f"  Observation: {self.observation}\n"
+        info += f"  Bin shape  : {self.bins.shape}\n"
+        info += f"  Bin attributes:\n"
+        for key, val in self.bin_def.items():
+            info += f"    - {key}: {len(val)-1} bins ({val[0]} to {val[-1]})\n"
+        info += f"  Bin averaged? {'Yes' if hasattr(self, 'bin_mean_data') else 'No'}"
+        return info
+    
+    def save(self, filepath: str | Path, overwrite: bool = False):
+
+        p = Path(filepath)
+        if p.suffix.lower() != '.pkl':
+            p = p.with_suffix('.pkl')
+
+        print(f"Saving UVIS observation bin object {p.stem}...", end='', flush=True)
+
+        if p.exists() and not overwrite:
+            response = input(f"File '{p.absolute()}' already exists. Overwrite? [y/N]: ").strip().lower()
+            if response not in ('y', 'yes', 'o', '1', 'oui'):
+                print("Save cancelled.")
+                return
+
+        with p.open('wb') as f:
+            pickle.dump(self, f)
+        
+        print(' Done')
+
+        return filepath
+    
+
+    @classmethod
+    def load(cls, filepath):
+        with open(filepath, 'rb') as f:
+            return pickle.load(f)
 
 
 class instrument(AttrDict):
@@ -940,27 +993,32 @@ class pds_raw_data:
         >>> data_pds = pds_raw_data('data_file.DAT', 'label_file.LBL')
 
         """
+
+        filename = Path(filename)
     
-        # File errors -----------------------------------------------
         file_error = "Please provide one .LBL file and one .DAT file."
-        if file2 is  None :
-            filedat = filename+'.DAT'
-            filelbl = filename+'.LBL'
-        else :
-            if '.DAT' in filename :
-                if '.LBL' in file2 :
+        if file2 is None:
+            filedat = filename.with_suffix('.DAT')
+            filelbl = filename.with_suffix('.LBL')
+        else:
+            if filename.suffix.upper() == '.DAT':
+                if Path(file2).suffix.upper() == '.LBL':
                     filedat = filename
-                    filelbl = file2
-                else : raise ValueError(file_error)
-            if '.LBL' in filename :
-                if '.DAT' in file2 :
-                    filedat = file2
+                    filelbl = Path(file2)
+                else:
+                    raise ValueError(file_error)
+            elif filename.suffix.upper() == '.LBL':
+                if Path(file2).suffix.upper() == '.DAT':
+                    filedat = Path(file2)
                     filelbl = filename
-                else : raise ValueError(file_error)
-        if not os.path.isfile(filedat) :
-            raise ValueError(".DAT file :", filedat,"does not exist")
-        if not os.path.isfile(filelbl) :
-            raise ValueError(".LBL file :", filelbl,"does not exist")
+                else:
+                    raise ValueError(file_error)
+            else:
+                raise ValueError(file_error)
+        if not filedat.is_file():
+            raise ValueError(f".DAT file: {filedat} does not exist")
+        if not filelbl.is_file():
+            raise ValueError(f".LBL file: {filelbl} does not exist")
         #____________________________________________________________
 
 
@@ -1066,7 +1124,7 @@ class UVIS_Observation:
             # For each line, if the path is relative, join with batch_dir and remove extension.
             args = [str((batch_dir / line).with_suffix('')) if not Path(line).is_absolute() else str(Path(line).with_suffix('')) for line in args]
             self.pds_data  = [pds_raw_data(f)    for f in args]
-            self.raw_files = [e.label.PRODUCT_ID for e in self.pds_data]
+            self.raw_files = [  str(f)           for f in args]
 
         else :
             # Read batch of PDS files
@@ -1074,7 +1132,7 @@ class UVIS_Observation:
                 args = args[0]
             
             self.pds_data  = [pds_raw_data(f)    for f in args] # Generate pds_raw_data structure for each file in the batch
-            self.raw_files = [e.label.PRODUCT_ID for e in self.pds_data]
+            self.raw_files = [  str(f)           for f in args]
             #________________________
 
 
@@ -1553,10 +1611,9 @@ class UVIS_Observation:
         self.uncertainty_inf[:,self.evil_pixels_binned] = np.nan
 
         for i in range(self.n_pics) :
-            print(self.cps_bg_removed[i].shape)
-            self.data[i]            = interpolate_nans(self.cps_bg_removed[i] * self.calibration[i], method=nan_interp, extrapolate=extrapolate)
-            self.uncertainty_sup[i] = interpolate_nans(self.uncertainty_sup[i], method=nan_interp, extrapolate=extrapolate)
-            self.uncertainty_inf[i] = interpolate_nans(self.uncertainty_inf[i], method=nan_interp, extrapolate=extrapolate)
+            self.data[i]            = interpolate_nans(self.cps_bg_removed[i] * self.calibration[i], method=nan_interp)
+            self.uncertainty_sup[i] = interpolate_nans(self.uncertainty_sup[i], method=nan_interp)
+            self.uncertainty_inf[i] = interpolate_nans(self.uncertainty_inf[i], method=nan_interp)
         
         if smooth : self.smooth(force=True)
         self.is_calibrated = True
@@ -1581,7 +1638,7 @@ class UVIS_Observation:
             A geometry object computed for the given time.
         """
         
-        from lib.UVIS_geometry import geometry
+        from Cassini_UPyP.lib.UVIS_geometry import geometry
 
         return geometry( ET, u=self, **kwargs)
 
@@ -1606,7 +1663,7 @@ class UVIS_Observation:
         self.geometry = []
         if et_range is None : et_range = self.ET_middle
 
-        for i in tqdm(range(len(et_range)), desc="Computing geometry", ncols=100) :
+        for i in tqdm(range(len(et_range)), desc="Computing geometry", file=sys.stdout):#, ncols=100) :
             et = et_range[i]
             self.geometry.append(self.get_geometry(et, **kwargs))
 
@@ -1655,10 +1712,15 @@ class UVIS_Observation:
         """
 
         folder = Path(folder)
+        if not folder.exists() :
+            folder.mkdir(parents=True, exist_ok=True)
+            print(f"Creating directory: {folder}")
+
+
         if out_format=='gif':
             # Case: GIF – assemble all images in memory
             frames = []
-            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry animation", ncols=100):
+            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry animation"):
                 buf = io.BytesIO()
                 obj.plot(save=True, savename=buf)
                 buf.seek(0)
@@ -1671,13 +1733,15 @@ class UVIS_Observation:
             print(f"GIF created : {gif_filename}")
         else :
             # Standard case: save each plot as an individual file
-            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry plots", ncols=100):
+            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry plots"):
                 filename = folder / f"geometry_{i}.{out_format}"
-                obj.plot(save=True, savename=str(filename))
+                obj.plot(save=True, savename=str(filename), show=False)
+            
+            plt.close('all')
 
 
     # -------- STARS IDENTIFICATION
-    def add_pixel_stars_from_file(self, file:str):
+    def add_pixel_stars_from_file(self, file:str|Path):
         """
         Add star contamination data from a file.
 
@@ -1692,18 +1756,17 @@ class UVIS_Observation:
         """
 
         with open(file, 'r') as f :
-
             stars_pixels = f.readlines()[1:]
 
         stars_pixels = [tuple(e.split()) for e in stars_pixels]
 
         for i,j in stars_pixels :
-            if not self.pixel_stars_mask[int(i), int(j)] :
+            if not self.pixel_stars_mask[int(j), int(i)] :
                 self.pixel_stars.append((int(i), int(j)))
                 self.pixel_stars_mask[int(j), int(i)] = True
 
     
-    def plot_radiance_evolution(self, output_path=None, ylim=(0.01,20), yscale='log', wl_range=(1600,1900), method='simpson') :
+    def plot_radiance_evolution(self, output_path=None, ylim=(0.01,20), yscale='log', wl_range=(1600,1900), method='trapezoid') :
         """
         Plot the evolution of integrated radiance for each pixel over exposures.
 
@@ -1772,7 +1835,7 @@ class UVIS_Observation:
                 plt.close(fig)
 
 
-    def check_stars(self,  cmap='gist_ncar', color_scale=(0,14), wl_range=(1600,1900), method='simpson'):
+    def check_stars(self,  cmap='gist_ncar', color_scale=(0,14), wl_range=(1600,1900), method='trapezoid'):
         """
         Create a heatmap of integrated radiance and highlight pixels affected by stars.
         The heatmap is interactive for the user to identify pixels as contaminated by a star.
@@ -1867,7 +1930,7 @@ class UVIS_Observation:
         for (row, col) in self.pixel_stars:
             x_center = (X[col] + X[col+1]) / 2
             y_center = (Y[row] + Y[row+1]) / 2
-            line, = ax.plot(x_center, y_center, 'x', color='red', markersize=8, mew=2)
+            line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
             self.markers[(row, col)] = line
         text_handle = ax_text.text(0, 1, "Selected pixels:\n", va='top', fontsize=10,family='monospace')
         # if self.markers :
@@ -1892,7 +1955,7 @@ class UVIS_Observation:
         def add_marker(row, col):
             x_center = (X[col] + X[col+1]) / 2
             y_center = (Y[row] + Y[row+1]) / 2
-            line, = ax.plot(x_center, y_center, 'x', color='red', markersize=8, mew=2)
+            line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
             self.markers[(row, col)] = line
 
         def remove_marker(row, col):
@@ -2019,7 +2082,7 @@ class UVIS_Observation:
             If the specified wavelength range is outside the detector range or if geometry is not initialized.
         """
 
-        from lib.UVIS_background import histogram, gaps, max_gap
+        from Cassini_UPyP.lib.UVIS_background import histogram, gaps, max_gap
 
         if not (self.WL[0]<wl_range[0]<self.WL[-1] and self.WL[0]<wl_range[1]<self.WL[-1]) :
             raise ValueError(f'Please select a wl_range within the {self.channel} channel.')
@@ -2036,8 +2099,8 @@ class UVIS_Observation:
                 if   alt_limit>2000 : alt_limit = 2000
                 elif alt_limit>1500 : alt_limit = 1500
                 else :
-                    print('no background pixels')
-                    loop = False
+                    print('No background pixels, please manually set a background level.')
+                    return np.nan, np.nan
             else : loop=False
 
 
@@ -2147,9 +2210,10 @@ class UVIS_Observation:
                     sys.stdout.write(f"\rPerforming background fits: {progress}%")
                     sys.stdout.flush()
                 print('')
+            
 
             cps     = np.mean(bg_fits)
-            cps_err = np.std(bg_fits)
+            cps_err = np.std (bg_fits)
 
         return cps, cps_err
 
@@ -2204,10 +2268,10 @@ class UVIS_Observation:
             If the number of keys does not match the number of bin_boundaries sets.
         """
 
-        print('Creating bins...', end='')
+        print('Creating bins...', end='', flush=True)
 
         if len(keys) != len(bin_boundaries):
-            raise ValueError("Le nombre de 'keys' doit correspondre au nombre de jeux de 'bin_boundaries'.")
+            raise ValueError("The number of 'keys' must match the number of 'bin_boundaries' sets.")
         
 
         bins = UVIS_bin(keys,bin_boundaries, self)
@@ -2245,7 +2309,7 @@ class UVIS_Observation:
         
 
     # -------- SAVE MANAGMENT
-    def save(self, filepath: str = None, overwrite: bool = False, fullsave=False):
+    def save(self, filepath: str = None, overwrite: bool = False, fullsave=True):
         """
         Saves the current UVIS_Observation instance to a pickle (.pkl) file.
         The object is save without self.geometry attribute unless keyword fullsave
@@ -2288,7 +2352,7 @@ class UVIS_Observation:
         if p.suffix.lower() != '.pkl':
             p = p.with_suffix('.pkl')
 
-        print(f"Saving UVIS observation object {p.stem}...", end='')
+        print(f"Saving UVIS observation object {p.stem}...", end='', flush=True)
 
         if p.exists() and not overwrite:
             response = input(f"File '{p.absolute()}' already exists. Overwrite? [y/N]: ").strip().lower()
@@ -2303,6 +2367,8 @@ class UVIS_Observation:
 
         if not fullsave: self.geometry = tmp
         return filepath
+
+
 
     def save_JSON(self, filepath:str=None, overwrite=False):
         """
@@ -2354,8 +2420,7 @@ class UVIS_Observation:
             "SPECTRAL_BIN"     : self.spec_bin,
             "INTEGRATION_TIME" : int(self.expo_time),
             "BACKGROUND"       : {},
-            "GEOMETRY"         : {},
-            "PIXEL_SIZE"       : {}
+            "GEOMETRY"         : {}
         }
 
         if self.background_level is not None: data['BACKGROUND']['LEVEL']       = self.background_level

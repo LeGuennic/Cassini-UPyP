@@ -1,6 +1,8 @@
 import numpy as np
 import random
 import math
+import time
+import os
 
 def bin_array(arr, SPE_UL=None, SPE_LR=None, BIN=1, mean=False):
     """
@@ -140,7 +142,7 @@ def histogram(A, max_value=None):
 
 
 
-def random_noise(n, N):
+def random_noise(n, N, rng=None):
     """
     Generate a 1D array of size n where N random increments
     are distributed across its elements.
@@ -159,7 +161,11 @@ def random_noise(n, N):
     """
 
     # Génération de tous les indices d'un coup
-    indices = np.random.randint(0, n, size=N)
+    
+    if rng is not None:
+        indices = rng.integers(0, n, size=N)
+    else:
+        indices = np.random.randint(0, n, size=N)
 
     # Comptage des occurrences de chaque index
     A = np.bincount(indices, minlength=n)
@@ -169,7 +175,8 @@ def random_noise(n, N):
 
     
 def simulate_histogram(count, n_iter, detector_shape=1024,
-                       SPE_UL=0, SPE_LR=1023, SPECTRA_BIN=1, SPATIAL_BIN=1, wl_index=None) :
+                       SPE_UL=0, SPE_LR=1023, SPECTRA_BIN=1, SPATIAL_BIN=1, wl_index=None, rng=None) :
+    
 
     if wl_index is None : h = np.zeros(SPE_LR-SPE_UL+1)
     else : h = np.zeros(wl_index[1]-wl_index[0]+1)
@@ -178,7 +185,7 @@ def simulate_histogram(count, n_iter, detector_shape=1024,
     for i in range (n_iter) :
         sim_sensor = np.zeros(detector_shape, dtype=int)
         for j in range(SPATIAL_BIN) :
-            sim_sensor += random_noise(detector_shape, count)
+            sim_sensor += random_noise(detector_shape, count, rng=rng)
         sim_sensor = bin_array(sim_sensor, SPE_UL, SPE_LR, SPECTRA_BIN)
 
         if wl_index is not None :
@@ -198,9 +205,8 @@ def simulate_histogram(count, n_iter, detector_shape=1024,
 
 
 
-def bg_fit(obs_histogram, n_iter, detector_shape=1024, exposition=1, **kwargs) :
+def bg_fit(obs_histogram, n_iter, detector_shape=1024, exposition=1, rng=None, **kwargs) :
     
-
     
     up,low = 1000,1
     dc = np.inf
@@ -214,7 +220,7 @@ def bg_fit(obs_histogram, n_iter, detector_shape=1024, exposition=1, **kwargs) :
         chi2_list = []
     
         for count in counts :
-            s = simulate_histogram(count, n_iter, detector_shape, **kwargs)
+            s = simulate_histogram(count, n_iter, detector_shape, rng=rng, **kwargs)
             
             chi2 = np.sum(
                 ( s - obs_histogram )**2
@@ -234,6 +240,11 @@ def bg_fit(obs_histogram, n_iter, detector_shape=1024, exposition=1, **kwargs) :
 
 
 def do_bg_fit(i_fit, H, shape0, expo_time, spec_start, spec_stop, spec_bin, spat_bin, wl_index):
+    
+    entropy = int(time.time_ns())  # nanosecondes → bien plus d'entropie que time.time()
+    seed = (entropy + os.getpid() + i_fit) % (2**32 - 1)
+    rng = np.random.default_rng(seed)
+
     result = bg_fit(
         H,
         shape0,
@@ -242,7 +253,8 @@ def do_bg_fit(i_fit, H, shape0, expo_time, spec_start, spec_stop, spec_bin, spat
         SPE_LR=spec_stop,
         SPECTRA_BIN=spec_bin,
         SPATIAL_BIN=spat_bin,
-        wl_index=wl_index
+        wl_index=wl_index,
+        rng=rng
     )
     return result
 
