@@ -813,8 +813,8 @@ class UVIS_bin:
     def save(self, filepath: str | Path, overwrite: bool = False):
 
         p = Path(filepath)
-        if p.suffix.lower() != '.pkl':
-            p = p.with_suffix('.pkl')
+        if p.suffix.lower() != '.uvisbin':
+            p = p.with_suffix('.uvisbin')
 
         print(f"Saving UVIS observation bin object {p.stem}...", end='', flush=True)
 
@@ -2345,12 +2345,12 @@ class UVIS_Observation:
             del self.geometry
 
 
-        if filepath is None: filepath = f"{self.name}.pkl"
+        if filepath is None: filepath = f"{self.name}.uvis"
 
 
         p = Path(filepath)
-        if p.suffix.lower() != '.pkl':
-            p = p.with_suffix('.pkl')
+        if p.suffix.lower() != '.uvis':
+            p = p.with_suffix('.uvis')
 
         print(f"Saving UVIS observation object {p.stem}...", end='', flush=True)
 
