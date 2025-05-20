@@ -642,6 +642,8 @@ class UVIS_bin:
 
         self.number_per_bin = np.zeros_like(self.bins, dtype=int)
 
+        self.bin_LOS = np.zeros_like(self.bins, dtype=uvis_obs.pixel_LOS.dtype)
+
         self.observation = uvis_obs.name
         self.data = uvis_obs.data
         self.uncertainty_sup = uvis_obs.uncertainty_sup
@@ -2302,6 +2304,27 @@ class UVIS_Observation:
                     # Use tuple indexing to access the cell in the NumPy array.
                     bins.bins[tuple(bin_indices)].append((i_pic, i_pix))
                     bins.number_per_bin[tuple(bin_indices)] += 1
+
+
+        # MEAN PIXEL GEOMETRIC PROPERTIES
+        for idx in np.ndindex(bins.bins.shape):
+            pairs = bins.bins[idx]
+            if not pairs:  # Empty bin
+                continue
+            # print(list(bins.bin_LOS.dtype.names))
+            for key in self.pixel_LOS.dtype.names:
+
+                # print(key)
+                # print([self.pixel_LOS[i, j,:][key] for (i, j) in pairs])
+
+                # print(np.mean([self.pixel_LOS[i, j,:][key] for (i, j) in pairs]))
+                # print('eeee')
+                # print(bins.bin_LOS[idx][key])
+                
+                bins.bin_LOS[idx][key] = np.mean([self.pixel_LOS[i, j,:][key] for (i, j) in pairs])
+                # print(bins.bin_LOS[idx][key])
+
+
         print(' Done')
         return bins
 
