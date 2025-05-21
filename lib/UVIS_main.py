@@ -642,6 +642,7 @@ class UVIS_bin:
 
         self.number_per_bin = np.zeros_like(self.bins, dtype=int)
 
+        self.pixel_LOS = np.copy(uvis_obs.pixel_LOS)
         self.bin_LOS = np.zeros_like(self.bins, dtype=uvis_obs.pixel_LOS.dtype)
 
         self.observation = uvis_obs.name
