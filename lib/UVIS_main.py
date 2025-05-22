@@ -651,6 +651,8 @@ class UVIS_bin:
         self.uncertainty_inf = uvis_obs.uncertainty_inf
         self.WL = uvis_obs.WL
 
+        self.slit_width = uvis_obs.slit_width
+
 
     def average_bins(self):
         """
@@ -1193,6 +1195,7 @@ class UVIS_Observation:
         self.pix_bandpass = pixel_bandpasses[self.channel]
         self.slit         = self.pds_data[0].label.SLIT_STATE
         self.slit_ratio   = slit_ratios[self.channel][self.slit]
+        self.slit_width   = slit_dlambda[self.channel][self.slit]
 
         self.evil_pixels        = None  # Mask: True when evil pixel
         self.evil_pixels_binned = None
