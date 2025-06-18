@@ -18,6 +18,7 @@ from scipy.interpolate import PchipInterpolator
 from scipy.io          import readsav
 from scipy.ndimage     import convolve1d
 from scipy.signal      import convolve2d
+from scipy.special import gamma
 
 # Misc
 from tqdm    import tqdm
@@ -643,9 +644,10 @@ class UVIS_bin:
         self.number_per_bin = np.zeros_like(self.bins, dtype=int)
 
         self.pixel_LOS = np.copy(uvis_obs.pixel_LOS)
-        self.bin_LOS = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
+        self.bin_LOS   = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
 
-        self.observation = uvis_obs.name
+        # Unbinned data
+        self.name = uvis_obs.name
         self.data = uvis_obs.data
         self.uncertainty_sup = uvis_obs.uncertainty_sup
         self.uncertainty_inf = uvis_obs.uncertainty_inf
@@ -656,42 +658,45 @@ class UVIS_bin:
 
     def average_bins(self):
         """
-        Compute unweighted and weighted average spectra (and associated uncertainties)
-        within each bin.
+        Compute unweighted and weighted average spectra, along with associated uncertainties, for each bin.
+        For each bin in `self.bins` (a NumPy array of lists of (x, y) pixel indices), this method:
+          1. Computes the unweighted mean, standard deviation, and standard error of the spectra from `self.data[x, y, :]`.
+          2. Computes the weighted mean spectrum using the combined uncertainty (average of upper and lower uncertainties)
+             as weights, where the weight for each pixel is `1.0 / combined_unc^2`.
+          3. Propagates upper and lower uncertainties for the weighted mean using the formula:
+             `sqrt(1.0 / sum(1.0 / unc^2))` for both upper (`sup`) and lower (`inf`) uncertainties.
+        Output arrays are initialized to NaN and only filled for bins containing at least one (x, y) pair.
 
-        For each bin in self.bins (a NumPy array of lists of (x, y) tuples):
-        1) Unweighted mean of self.data[x, y, :] and standard deviation (self.bin_stddev).
-        2) Weighted mean of self.data[x, y, :], using combined_unc = (sup + inf)/2
-            as the effective uncertainty for each pixel. 
-            The weight is 1.0 / combined_unc^2.
-            The result is stored in self.bin_mean_data_w.
-        3) Propagation of upper/lower errors, computed as:
-            upper_error = sqrt(1.0 / sum(1.0 / sup^2))
-            lower_error = sqrt(1.0 / sum(1.0 / inf^2))
-            stored in self.bin_uncertainty_sup / self.bin_uncertainty_inf.
+        Parameters
+        ----------
+        None
 
-        Shapes:
-        - self.bins.shape = (d1, d2, ..., dn).
-        - self.WL.shape   = (nwl, ) for the spectral dimension.
-        - Each output array has shape (d1, d2, ..., dn, nwl).
-
-        In each bin, if there are no (x, y) pairs, the output arrays remain NaN at that index.
-
-        Notes
-        ----- 
-        - The function does not return anything; results are stored in:
-            self.bin_mean_data, self.bin_stddev, self.bin_mean_data_w,
-            self.bin_uncertainty_sup, self.bin_uncertainty_inf.
+        Returns
+        -------
+        None
+            Results are stored as attributes:
+            - `self.bin_mean_spectrum`: Unweighted mean spectrum per bin.
+            - `self.bin_stddev_spectrum`: Unweighted standard deviation per bin.
+            - `self.bin_stderr_spectrum`: Unweighted standard error per bin (with small-sample correction).
+            - `self.bin_wmean_spectrum`: Weighted mean spectrum per bin.
+            - `self.bin_u_sup_spectrum`: Propagated upper uncertainty of weighted mean per bin.
+            - `self.bin_u_inf_spectrum`: Propagated lower uncertainty of weighted mean per bin.
+        - `self.bins.shape` is the shape of the bin grid (e.g., (d1, d2, ..., dn)).
+        - `self.WL.shape` is the shape of the spectral dimension (e.g., (nwl,)).
+        - All output arrays have shape `self.bins.shape + self.WL.shape`.
+        - If a bin is empty, the corresponding output entries remain NaN.
+        - Sets `self.bin_averaged = True` upon completion.
         """
 
         bin_shape = self.bins.shape
         out_shape = bin_shape + self.WL.shape
 
-        self.bin_mean_data       = np.full(out_shape, np.nan, dtype=float)
+        self.bin_mean_spectrum   = np.full(out_shape, np.nan, dtype=float)
         self.bin_stddev_spectrum = np.full(out_shape, np.nan, dtype=float)
-        self.bin_mean_data_w     = np.full(out_shape, np.nan, dtype=float)
-        self.bin_uncertainty_sup = np.full(out_shape, np.nan, dtype=float)
-        self.bin_uncertainty_inf = np.full(out_shape, np.nan, dtype=float)
+        self.bin_stderr_spectrum = np.full(out_shape, np.nan, dtype=float)
+        self.bin_wmean_spectrum = np.full(out_shape, np.nan, dtype=float)
+        self.bin_u_sup_spectrum  = np.full(out_shape, np.nan, dtype=float)
+        self.bin_u_inf_spectrum  = np.full(out_shape, np.nan, dtype=float)
 
         for idx in np.ndindex(bin_shape):
             pairs = self.bins[idx]
@@ -703,9 +708,14 @@ class UVIS_bin:
             stacked_sup  = np.array([self.uncertainty_sup[i, j, :] for (i, j) in pairs]) 
             stacked_inf  = np.array([self.uncertainty_inf[i, j, :] for (i, j) in pairs])
 
-            # 2) Unweighted mean & std
-            self.bin_mean_data[idx]       = stacked_data.mean(axis=0)
-            self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0)   # e.g. unbiased std
+            # 2) Unweighted mean & std deviation & standard error
+            self.bin_mean_spectrum[idx]   = stacked_data.mean(axis=0)
+            self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0, ddof=1)
+
+            N = len(pairs)
+            correction = ( gamma((N - 1) / 2) /
+                           gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+            self.bin_stderr_spectrum[idx] = correction * self.bin_stddev_spectrum[idx] / np.sqrt(N)
 
             # 3) Weighted mean using combined uncertainty = (sup + inf)/2
             combined_unc = 0.5 * (stacked_sup + stacked_inf)
@@ -715,7 +725,7 @@ class UVIS_bin:
             w_data_sum   = (stacked_data * weights).sum(axis=0)
 
             # Weighted mean (avoid division by zero where w_sum==0)
-            self.bin_mean_data_w[idx] = np.divide(w_data_sum, w_sum,
+            self.bin_wmean_spectrum[idx] = np.divide(w_data_sum, w_sum,
                                                   out=np.full(self.WL.shape, np.nan), where=(w_sum>0))
 
             # 4) Propagate separate upper/lower uncertainties
@@ -726,11 +736,11 @@ class UVIS_bin:
             sum_inv_inf_sq = inv_inf_sq.sum(axis=0)
 
             # sqrt(1 / sum(1/unc^2))
-            self.bin_uncertainty_sup[idx] = np.sqrt(
+            self.bin_u_sup_spectrum[idx] = np.sqrt(
                 np.divide(1.0, sum_inv_sup_sq,
                           out=np.full(self.WL.shape, np.nan), where=(sum_inv_sup_sq>0))
                 )
-            self.bin_uncertainty_inf[idx] = np.sqrt(
+            self.bin_u_inf_spectrum[idx] = np.sqrt(
                 np.divide(1.0, sum_inv_inf_sq,
                           out=np.full(self.WL.shape, np.nan), where=(sum_inv_inf_sq>0))
                 )
@@ -738,7 +748,8 @@ class UVIS_bin:
         self.bin_averaged = True
 
     def integrate(self, wl_range=(1600,1900), uncertainty=True, method='simpson'):
-
+        
+        # Integrate spectra
         self.integrated_data = integrate_spectrum(self.WL, self.data, wl_range=wl_range, axis=-1)
         self.integrated_uncertainty_inf = integrate_spectrum(self.WL, self.uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
         self.integrated_uncertainty_sup = integrate_spectrum(self.WL, self.uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
@@ -749,14 +760,20 @@ class UVIS_bin:
         self.binned_integrated_uncertainty_sup = np.full(self.bins.shape, np.nan, dtype=float)
         self.binned_integrated_uncertainty_inf = np.full(self.bins.shape, np.nan, dtype=float)
         self.bin_stddev                        = np.full(self.bins.shape, np.nan, dtype=float)
+        self.bin_stderr                        = np.full(self.bins.shape, np.nan, dtype=float)
 
         for idx in np.ndindex(self.bins.shape):
             
             pairs = self.bins[idx]
             if not pairs:  continue
 
+            N = len(pairs)
+            correction = ( gamma((N - 1) / 2) /
+                           gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+
             self.binned_integrated_data[idx] = np.mean([self.integrated_data[i, j] for (i, j) in pairs])
-            self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs])
+            self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs], ddof=1)
+            self.bin_stderr[idx]             = correction * self.bin_stddev[idx] / np.sqrt(N)
 
             self.binned_integrated_uncertainty_sup[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_sup[i, j]**2 for (i, j) in pairs]))
             self.binned_integrated_uncertainty_inf[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_inf[i, j]**2 for (i, j) in pairs]))
@@ -764,14 +781,15 @@ class UVIS_bin:
         self.bin_integrated = True
 
 
-        # Integrate bin-averaged arrays
+        # Integrate the already bin-averaged spectra
         if self.bin_averaged:
-            self.integrated_bin_data            = integrate_spectrum(self.WL, self.bin_mean_data,   wl_range=wl_range, axis=-1, method=method)
-            self.integrated_bin_data_w          = integrate_spectrum(self.WL, self.bin_mean_data_w, wl_range=wl_range, axis=-1, method=method)
+            self.integrated_avrg_data            = integrate_spectrum(self.WL, self.bin_mean_spectrum,  wl_range=wl_range, axis=-1, method=method)
+            self.integrated_avrg_data_w          = integrate_spectrum(self.WL, self.bin_wmean_spectrum, wl_range=wl_range, axis=-1, method=method)
 
-            self.integrated_bin_stddev          = integrate_spectrum(self.WL, self.bin_stddev_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
-            self.integrated_bin_uncertainty_sup = integrate_spectrum(self.WL, self.bin_uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
-            self.integrated_bin_uncertainty_inf = integrate_spectrum(self.WL, self.bin_uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_avrg_stddev          = integrate_spectrum(self.WL, self.bin_stddev_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_avrg_stderr          = integrate_spectrum(self.WL, self.bin_stderr_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_avrg_uncertainty_sup = integrate_spectrum(self.WL, self.bin_u_sup_spectrum,  wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_avrg_uncertainty_inf = integrate_spectrum(self.WL, self.bin_u_inf_spectrum,  wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
 
 
     def plot_bin(self):
