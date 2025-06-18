@@ -694,7 +694,7 @@ class UVIS_bin:
         self.bin_mean_spectrum   = np.full(out_shape, np.nan, dtype=float)
         self.bin_stddev_spectrum = np.full(out_shape, np.nan, dtype=float)
         self.bin_stderr_spectrum = np.full(out_shape, np.nan, dtype=float)
-        self.bin_wmean_spectrum = np.full(out_shape, np.nan, dtype=float)
+        self.bin_wmean_spectrum  = np.full(out_shape, np.nan, dtype=float)
         self.bin_u_sup_spectrum  = np.full(out_shape, np.nan, dtype=float)
         self.bin_u_inf_spectrum  = np.full(out_shape, np.nan, dtype=float)
 
@@ -709,13 +709,21 @@ class UVIS_bin:
             stacked_inf  = np.array([self.uncertainty_inf[i, j, :] for (i, j) in pairs])
 
             # 2) Unweighted mean & std deviation & standard error
-            self.bin_mean_spectrum[idx]   = stacked_data.mean(axis=0)
-            self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0, ddof=1)
-
             N = len(pairs)
-            correction = ( gamma((N - 1) / 2) /
-                           gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
-            self.bin_stderr_spectrum[idx] = correction * self.bin_stddev_spectrum[idx] / np.sqrt(N)
+            
+            self.bin_mean_spectrum[idx]   = stacked_data.mean(axis=0)
+            if N>1 :
+                self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0, ddof=1)
+
+                correction = ( gamma((N - 1) / 2) /
+                            gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+                self.bin_stderr_spectrum[idx] = correction * self.bin_stddev_spectrum[idx] / np.sqrt(N)
+            else :
+                self.bin_stddev_spectrum[idx] = np.zeros_like(self.WL)
+                self.bin_stderr_spectrum[idx] = np.full_like(self.WL, fill_value=np.nan, dtype=float)
+
+
+
 
             # 3) Weighted mean using combined uncertainty = (sup + inf)/2
             combined_unc = 0.5 * (stacked_sup + stacked_inf)
@@ -768,12 +776,20 @@ class UVIS_bin:
             if not pairs:  continue
 
             N = len(pairs)
-            correction = ( gamma((N - 1) / 2) /
-                           gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
 
             self.binned_integrated_data[idx] = np.mean([self.integrated_data[i, j] for (i, j) in pairs])
-            self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs], ddof=1)
-            self.bin_stderr[idx]             = correction * self.bin_stddev[idx] / np.sqrt(N)
+
+            if N>1:
+                correction = ( gamma((N - 1) / 2) /
+                            gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+
+                
+                self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs], ddof=1)
+                self.bin_stderr[idx]             = correction * self.bin_stddev[idx] / np.sqrt(N)
+
+            else:
+                self.bin_stddev[idx]             = 0
+                self.bin_stderr[idx]             = np.nan
 
             self.binned_integrated_uncertainty_sup[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_sup[i, j]**2 for (i, j) in pairs]))
             self.binned_integrated_uncertainty_inf[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_inf[i, j]**2 for (i, j) in pairs]))
