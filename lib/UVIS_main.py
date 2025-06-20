@@ -1419,7 +1419,9 @@ class UVIS_Observation:
         -----
         Smoothing is applied only on valid (non-NaN) data points.
         """
-        
+        if self.channel!='FUV' :
+            print('Smoothing is only available for FUV channel')
+            return
         if self.is_smoothed and not force :
             print('Spectral data is already smoothed')
             return
