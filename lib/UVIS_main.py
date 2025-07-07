@@ -656,6 +656,9 @@ class UVIS_bin:
 
         self.slit_width = uvis_obs.slit_width
 
+        self.bin_averaged   = False
+        self.bin_integrated = False
+
 
     def average_bins(self):
         """
@@ -842,7 +845,7 @@ class UVIS_bin:
 
     def __repr__(self):
         info = f"<UVIS_bin object>\n"
-        info += f"  Observation: {self.observation}\n"
+        info += f"  Observation: {self.name}\n"
         info += f"  Bin shape  : {self.bins.shape}\n"
         info += f"  Bin attributes:\n"
         for key, val in self.bin_def.items():
@@ -2322,6 +2325,7 @@ class UVIS_Observation:
         for i_pic in range(self.n_pics):
             for i_pix in range(self.n_pixels):
                 if i_pix==59 : continue
+                
                 if self.pixel_corrupted[i_pic,i_pix] or self.pixel_stars_mask[i_pic,i_pix] : continue
 
                 if   mode == 'center':

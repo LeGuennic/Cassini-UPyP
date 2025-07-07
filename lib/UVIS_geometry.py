@@ -1587,8 +1587,8 @@ class geometer:
         lons, lats, alts = ellipsoid_xyz(self.radii, tangent_point, units='degrees')
         if self.planet=='TITAN': lons = 360-lons
         sza   = vec_angle(tangent_point, tangent_point_to_sun)
-        phase = vec_angle(LOS,           tangent_point_to_sun)
-        ems   = vec_angle(LOS,           tangent_point)
+        phase = vec_angle(-LOS,           tangent_point_to_sun)
+        ems   = vec_angle(-LOS,           tangent_point)
 
         lst = 12.0 - (lons - self.sub_solar_longitude) * (24.0 / 360.0)
         # On peut éventuellement ramener la LST dans l'intervalle 0-24 :
