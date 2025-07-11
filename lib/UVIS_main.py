@@ -2162,7 +2162,6 @@ class UVIS_Observation:
         cps     = np.mean(counts_per_pixel)  /  (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)   /  self.expo_time
         cps_err = np.std(counts_per_pixel)  /   (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)  /   self.expo_time
 
-
         wl_index = (
             np.where(self.WL>=wl_range[0])[0][ 0],
             np.where(self.WL<=wl_range[1])[0][-1]+1
@@ -2207,7 +2206,6 @@ class UVIS_Observation:
                     )
             H /= bg_pixels.shape[0]
 
-
             
 
             # Perform simulation and fits
@@ -2221,6 +2219,7 @@ class UVIS_Observation:
                     (
                         i_fit,
                         H,
+                        bg_pixels.shape[0],
                         1024,
                         self.expo_time,
                         self.spec_start,
@@ -2247,9 +2246,9 @@ class UVIS_Observation:
                 for i_fit in range(n_fits) :
                     bg_fits.append(
                         bg_fit(
-                        H, 1024, exposition=self.expo_time,
-                        SPE_UL=self.spec_start, SPE_LR=self.spec_stop, SPECTRA_BIN=self.spec_bin,
-                        SPATIAL_BIN=self.spat_bin, wl_index=wl_index
+                        H, bg_pixels.shape[0], 1024, exposition=self.expo_time,
+                        SPE_UL=self.spec_start,    SPE_LR=self.spec_stop,
+                        SPECTRA_BIN=self.spec_bin, SPATIAL_BIN=self.spat_bin, wl_index=wl_index
                         )
                     )
                     progress = 100*(i_fit+1)//n_fits
@@ -2260,7 +2259,11 @@ class UVIS_Observation:
 
             cps     = np.mean(bg_fits)
             cps_err = np.std (bg_fits)
-
+            if cps > 1e-3 : 
+                warnings.warn(
+                    f"Background level is unusually high: {cps:.2e} counts/s. Probably due to a wrong fit in the simulation (local minimum), use 'average' mode instead.",
+                    RuntimeWarning
+                )
         return cps, cps_err
 
 
