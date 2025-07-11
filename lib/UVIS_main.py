@@ -17,8 +17,6 @@ from scipy.integrate   import simpson
 from scipy.interpolate import PchipInterpolator
 from scipy.io          import readsav
 from scipy.ndimage     import convolve1d
-from scipy.signal      import convolve2d
-from scipy.special import gamma
 
 # Misc
 from tqdm    import tqdm
@@ -38,7 +36,20 @@ from Cassini_UPyP.config.pipeline_defaults import *
 
 import Cassini_UPyP.config.env as env
 
-import scipy.ndimage as ndi
+
+def correction_factor(N:int, log=True) -> float:
+    from scipy.special import gammaln, gamma
+
+
+    N = np.asarray(N, dtype=float)
+
+    if log:
+        log_ratio = gammaln((N - 1)/2) - gammaln(N/2)        # ou gammaln(...)
+        return np.exp(log_ratio) * np.sqrt((N - 1)/2)
+    else:
+        return ( gamma((N - 1) / 2) /
+                 gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+    
 
 class AttrDict(dict):
     def __getattr__(self, key):
@@ -115,7 +126,7 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
             wl_sub = wl_sub[:-1]
             s_sub  = np.take(s_sub, np.arange(s_sub.shape[axis] - 1), axis=axis) 
             
-            warnings.warn("Odd number of segments for Simpson's method, last point removed.", RuntimeWarning)
+            # warnings.warn("Odd number of segments for Simpson's method, last point removed.", RuntimeWarning)
 
         
         if not uncertainty:
@@ -719,8 +730,7 @@ class UVIS_bin:
             if N>1 :
                 self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0, ddof=1)
 
-                correction = ( gamma((N - 1) / 2) /
-                            gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+                correction = correction_factor(N)
                 self.bin_stderr_spectrum[idx] = correction * self.bin_stddev_spectrum[idx] / np.sqrt(N)
             else :
                 self.bin_stddev_spectrum[idx] = np.zeros_like(self.WL)
@@ -784,10 +794,8 @@ class UVIS_bin:
             self.binned_integrated_data[idx] = np.mean([self.integrated_data[i, j] for (i, j) in pairs])
 
             if N>1:
-                correction = ( gamma((N - 1) / 2) /
-                            gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
+                correction = correction_factor(N)
 
-                
                 self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs], ddof=1)
                 self.bin_stderr[idx]             = correction * self.bin_stddev[idx] / np.sqrt(N)
 
