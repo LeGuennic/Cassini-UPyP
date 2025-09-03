@@ -748,10 +748,8 @@ class geometry:
                 meta_kernel=metakernel(ET, filter_yd=(u.YEAR, u.DOY))
                 for kernel in meta_kernel:
                     spice.furnsh(kernel)
-
-            else : spice.furnsh(meta_kernel)
-
-
+            else :
+                spice.furnsh(meta_kernel)
 
         # Call geometry engine
         if target : self.target = target
@@ -805,7 +803,7 @@ class geometry:
 
             # Night side
             self.night_side = {}
-            if np.any(~self.dayside) :
+            if np.any(~self.dayside) and len(self.terminator['XYZ'])>0 :
                 # Concatenate night side limb points with terminator line points in the right order
                 if   (abs(np.linalg.norm(self.terminator['XYZ'][ 0] - target_limb_xyz[~self.dayside][-1]))
                     < abs(np.linalg.norm(self.terminator['XYZ'][-1] - target_limb_xyz[~self.dayside][-1])))  :
@@ -1221,9 +1219,12 @@ class geometry:
                     self.rotate(view_center=orf_center)
 
         
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(5,5))
             ax.set_facecolor(plotconfig.BACKGROUND_COLOR)
             ax.set_aspect('equal')
+
+            ax.set_xticks([])
+            ax.set_yticks([])
 
             xmin,xmax = RA_range
             ymin,ymax = DEC_range
@@ -1349,7 +1350,8 @@ class geometry:
             if show :
                 plt.show(block=False)
             if save :
-                fig.savefig(savename)
+                fig.tight_layout()
+                fig.savefig(savename, dpi=1900/5)
                 plt.close(fig)
             # if not show : return fig
         

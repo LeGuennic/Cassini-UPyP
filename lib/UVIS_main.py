@@ -1752,6 +1752,7 @@ class UVIS_Observation:
             ).reshape(self.n_pics, n_pixels)
         
     def plot_all_geometry(self, folder, out_format='png', duration=1/60):
+        from PIL import Image
         """
         Plot geometry for all exposures and save the results.
 
@@ -1778,12 +1779,27 @@ class UVIS_Observation:
                 buf = io.BytesIO()
                 obj.plot(save=True, savename=buf)
                 buf.seek(0)
-                frame = imageio.imread(buf)
-                frames.append(frame)
+
+                im = Image.open(buf).convert("RGBA")
+                frames.append(im)
                 buf.close()
 
+
+                # frame = imageio.imread(buf)
+                # frames.append(frame)
+                # buf.close()
+
             gif_filename = folder / f"{self.name}.gif"
-            imageio.mimsave(str(gif_filename), frames, duration=duration, loop=0)
+
+            frames[0].save(
+            gif_filename,
+            save_all=True,
+            append_images=frames[1:],
+            loop=0,
+            duration=duration,
+            disposal=2           # important for transparency
+            )
+            # imageio.mimsave(str(gif_filename), frames, duration=duration, loop=0)
             print(f"GIF created : {gif_filename}")
         else :
             # Standard case: save each plot as an individual file
