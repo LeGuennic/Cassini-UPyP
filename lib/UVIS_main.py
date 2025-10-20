@@ -2,6 +2,7 @@
 from __future__ import annotations
 import sys
 from typing import List, Tuple, Literal
+from numpy.typing import ArrayLike
 
 import io
 import imageio
@@ -44,12 +45,92 @@ def correction_factor(N:int, log=True) -> float:
     N = np.asarray(N, dtype=float)
 
     if log:
-        log_ratio = gammaln((N - 1)/2) - gammaln(N/2)        # ou gammaln(...)
+        log_ratio = gammaln((N - 1)/2) - gammaln(N/2)
         return np.exp(log_ratio) * np.sqrt((N - 1)/2)
     else:
         return ( gamma((N - 1) / 2) /
                  gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
-    
+
+def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0):
+    """
+    Compute Garwood confidence limits for a Poisson count.
+
+    This function returns *one* bound (lower or upper) of the central
+    two-sided confidence interval for an observed Poisson count `x`,
+    using the classical Garwood construction obtained by inverting
+    the chi-square CDF.
+
+    Parameters
+    ----------
+    x : int or array-like of int
+        Observed Poisson count(s), must be >= 0.
+    bound : {'inf', 'sup'}
+        Which bound to return:
+        - 'inf' : lower confidence limit L.
+        - 'sup' : upper confidence limit U.
+        Aliases accepted: 'lower' -> 'inf', 'upper' -> 'sup'.
+    sigma : float, optional
+        Number of Gaussian sigmas corresponding to the *central* confidence
+        level (two-sided). For example:
+        - sigma = 1.0  -> CL ≈ 68.27%
+        - sigma = 1.96 -> CL ≈ 95%
+        Default is 1.0.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The requested bound with the same shape as `x`. Returns a Python
+        float if `x` is scalar.
+
+    Notes
+    -----
+    Let CL be the central confidence level and alpha = 1 - CL, with
+    CL = Φ(sigma) - Φ(-sigma), where Φ is the standard normal CDF.
+    The Garwood limits are
+
+        L = 0.5 * chi2.ppf(alpha/2, 2*x)        for x > 0,   and L = 0 if x = 0
+        U = 0.5 * chi2.ppf(1 - alpha/2, 2*(x+1))
+
+    These intervals have (at least) the nominal coverage.
+
+    References
+    ----------
+    - F. Garwood (1936). "Fiducial Limits for the Poisson Distribution."
+      Biometrika, 28(3/4), 437–442.
+    - G. Casella & R. L. Berger (2002). *Statistical Inference*, 2nd ed.
+    """
+    from scipy.stats import chi2, norm
+
+    # Normalize and validate bound
+    b = bound.lower().strip()
+    if b in {"lower"}:
+        b = "inf"
+    elif b in {"upper"}:
+        b = "sup"
+    if b not in {"inf", "sup"}:
+        raise ValueError("Invalid bound type. Use 'sup' or 'inf' (or 'upper'/'lower').")
+
+    # Convert and validate x
+    x_arr = np.asarray(x)
+
+    if np.any(x_arr < 0):
+        raise ValueError("`x` must be >= 0.")
+
+    # Confidence level from sigma
+    cl = norm.cdf(sigma) - norm.cdf(-sigma)
+    alpha = 1 - cl
+
+    # Compute bounds (vectorized)
+    if b == "sup":
+        res = 0.5 * chi2.ppf(1 - alpha / 2, 2*(x_arr+1))
+    else:  # 'inf'
+        lower_raw = 0.5 * chi2.ppf(alpha / 2.0, 2 * x_arr)
+        res = np.where(x_arr == 0, 0.0, lower_raw)
+
+    # Return scalar if scalar input
+    if np.isscalar(x) or np.ndim(x_arr) == 0:
+        return float(np.asarray(res).item())
+    return np.asarray(res, dtype=float)
 
 class AttrDict(dict):
     def __getattr__(self, key):
@@ -1393,19 +1474,19 @@ class UVIS_Observation:
             )
 
         # Scores error interval
-        count_sup_err = 0.5 + np.sqrt(self.counts+0.25)
-        count_inf_err = 0.5 - np.sqrt(self.counts+0.25)
+        count_sup_err = poisson_error(self.counts, bound='sup') - self.counts
+        count_inf_err = poisson_error(self.counts, bound='inf') - self.counts
 
         uncertainty_sup = np.zeros_like(self.counts, dtype=float)
         uncertainty_inf = np.zeros_like(self.counts, dtype=float)
 
         # Upper bound for zero counts
-        uncertainty_sup[~counts_position] = (1/self.expo_time) * self.calibration[~counts_position]
+        uncertainty_sup[~counts_position] = self.calibration[~counts_position] / self.expo_time
 
         uncertainty_sup[ counts_position] = (
             self.cps_bg_removed[counts_position] * self.calibration[counts_position] *
             np.sqrt(
-                (count_sup_err[counts_position] / self.counts[counts_position])**2 +
+                (count_sup_err[counts_position]          / self.counts[counts_position])**2 +
                 (self.calibration_error[counts_position] / self.calibration[counts_position])**2
             )
         )
