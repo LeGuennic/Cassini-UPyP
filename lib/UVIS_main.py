@@ -971,8 +971,14 @@ class UVIS_bin:
 
 
 class instrument(AttrDict):
-    def __init__(self, ID, n_pixels):
-        self.ID = ID
+    def __init__(self, instrument_name, n_pixels):
+        self.name = instrument_name
+
+
+        spice.furnsh(env.ik_path)
+        self.ID = spice.bodn2c(instrument_name)
+        spice.unload(env.ik_path)
+        
 
         # Get parameters in degree
         self.shape, self.frame, self.bsight, self.bounds, self.corners = spice.getfov(self.ID, 4)
@@ -983,7 +989,7 @@ class instrument(AttrDict):
         fov_h_angle = spice.gdpool(f'INS{self.ID}_FOV_REF_ANGLE',   0, 1)[0] 
         fov_w_angle = spice.gdpool(f'INS{self.ID}_FOV_CROSS_ANGLE', 0, 1)[0]
         
-        self.fov_height = 2 * fov_h_angle
+        self.fov_height = 2 * fov_h_angle # In degrees
         self.fov_width  = 2 * fov_w_angle
 
         self.pixel_height = self.fov_height / n_pixels
@@ -1368,11 +1374,8 @@ class UVIS_Observation:
             case 'HIGH_RESOLUTION' : self.slit_ID = 'HI'
             case 'OCCLTATION'      : self.slit_ID = 'OCC'
         self.instrument_name = 'CASSINI_UVIS_'+self.channel+'_' + self.slit_ID
-        
-        spice.furnsh(env.ik_path)
-        self.instrument = instrument(spice.bodn2c(self.instrument_name), 64)
-       
-        spice.unload(env.ik_path)
+        self.instrument = instrument(self.instrument_name, 64)
+
 
         # Observation
         self.target = target.upper()

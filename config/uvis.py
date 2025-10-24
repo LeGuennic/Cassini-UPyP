@@ -26,7 +26,7 @@ pixel_bandpasses = {'EUV':0.6049,
 
 # Slit width image for PSF in Angstroms
 slit_dlambda = {'EUV':{'OCCLTATION':19.4,   'LOW_RESOLUTION':4.8, 'HIGH_RESOLUTION':2.75}, 
-              'FUV':{'OCCLTATION':24.9,   'LOW_RESOLUTION':4.8, 'HIGH_RESOLUTION':2.75}}
+                'FUV':{'OCCLTATION':24.9,   'LOW_RESOLUTION':4.8, 'HIGH_RESOLUTION':2.75}}
 
 
 # Slit width in microns
