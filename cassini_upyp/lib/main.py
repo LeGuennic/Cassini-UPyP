@@ -5,7 +5,6 @@ from typing import List, Tuple, Literal
 from numpy.typing import ArrayLike
 
 import io
-import imageio
 import os
 import ast
 import math
@@ -29,13 +28,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Code libraries
-from Cassini_UPyP.lib.UVIS_background import bg_fit, do_bg_fit
-from Cassini_UPyP.lib.utils import *
+from cassini_upyp.lib.background import bg_fit, do_bg_fit
+from cassini_upyp.lib.utils import *
 
-from Cassini_UPyP.config.uvis              import *
-from Cassini_UPyP.config.pipeline_defaults import *
+from cassini_upyp.config.uvis              import *
+from cassini_upyp.config.pipeline_defaults import *
 
-import Cassini_UPyP.config.env as env
+import cassini_upyp.config.env as env
 
 
 def correction_factor(N:int, log=True) -> float:
@@ -99,6 +98,7 @@ def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0
       Biometrika, 28(3/4), 437–442.
     - G. Casella & R. L. Berger (2002). *Statistical Inference*, 2nd ed.
     """
+    
     from scipy.stats import chi2, norm
 
     # Normalize and validate bound
@@ -977,7 +977,7 @@ class instrument(AttrDict):
 
         spice.furnsh(env.ik_path)
         self.ID = spice.bodn2c(instrument_name)
-        spice.unload(env.ik_path)
+        
         
 
         # Get parameters in degree
@@ -995,7 +995,7 @@ class instrument(AttrDict):
         self.pixel_height = self.fov_height / n_pixels
         self.pixel_width  = self.fov_width
 
-
+        spice.unload(env.ik_path)
         # COMPUTE PIXEL CORNERS IN INSTRUMENT FRAME
         #------------------------------------------
         # Array indices : center, b_l, b_r, u_r, u_l
@@ -2665,159 +2665,3 @@ class UVIS_Observation:
         """Ajoute un nouvel attribut même après l'initialisation."""
         object.__setattr__(self, key, value)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-#-------------------------------------------------------------------------------------
-#_____________________________________________________________________________________
-
-
-"""
-CHANGES :
-Precision : python default float format is 64 bit, IDL is 32.
-Precision in python is limited by binary files, read in 32 bit like IDL, and txt files.
-
-Interpolation :
-Added pchip to interpolate from low res sensitivity to full detector resolution
-
-Start time :
-now exposure start and stop times are not rounded to the inferior integer (milliseconds from LBL are included)
-
-Background simulation is fixed
-
-Binning use only pixel center or all pixels
-
-Integration can be done with simpson method
-
-NOTE:
-In CG, calibration is made on start time of LBL file. Can be interpolated for each frame time in the cube.
-
-
-"""
-
-"""
-THINGS TO CITE
---------------
-
-OPUS, PDS, NAIF toolkit, SPICEYPY
-
-"""
-
-
-# OUTDATED --------------------------------------------
-# def read_pds(filename:str=None, file2:str=None, no_extract=False) :
-#     """
-#     Read PDS (Planetary Data System) raw files from the Cassini UVIS instrument.
-
-#     This function reads raw data files from the Cassini Ultraviolet Imaging Spectrograph (UVIS).
-#     It requires two files: a binary data file (.DAT) containing raw counts from the detector,
-#     and a label text file (.LBL) containing metadata about the observation.
-
-#     Parameters
-#     ----------
-#     filename : str
-#         The path to the label (.LBL) or binary (.DAT) file to read, with or without file extension.
-#         If given without an extension, both files are assumed to have the same name with their respective extensions.
-
-#     file2 : str, optional
-#         The path to the second file (either .DAT or .LBL) if `filename` is given with an extension (.DAT or .LBL).
-#         This allows specifying both files explicitly when they have different names or locations.
-
-#     no_extract : bool, optional
-#         If `True`, the data is not extracted based on window boundaries specified in the label.
-#         Default is `False`.
-
-#     Returns
-#     -------
-#     pds_raw_data
-#         An object containing the raw data and metadata, with attributes and methods for further processing.
-
-#     Raises
-#     ------
-#     ValueError
-#         If the required files are not provided, cannot be found, or if the data type is unrecognized.
-
-#     Notes
-#     -----
-#     - The function pairs the .DAT and .LBL files automatically if only one is specified without an extension.
-#     - The data is read and stored as a NumPy array, with dimensions adjusted according to the label information.
-#     - If `no_extract` is `False`, the data is extracted based on the window boundaries and binning specified in the label.
-
-#     Examples
-#     --------
-#     Read a PDS file set by specifying the base filename without extension:
-
-#     >>> data_pds = read_pds('example_file')
-
-#     Read a PDS file set by specifying both the label and data files explicitly:
-
-#     >>> data_pds = read_pds('data_file.DAT', 'label_file.LBL')
-
-#     """
-    
-#     # Value errors
-#     file_error = "Please provide one .LBL file and one .DAT file."
-#     if file2 is  None :
-#         filedat = filename+'.DAT'
-#         filelbl = filename+'.LBL'
-#     else :
-#         if '.dat' in filename :
-#             if '.lbl' in file2 :
-#                 filedat = filename
-#                 filelbl = file2
-#             else : raise ValueError(file_error)
-#         if '.lbl' in filename :
-#             if '.dat' in file2 :
-#                 filedat = file2
-#                 filelbl = filename
-#             else : raise ValueError(file_error)
-#     if not os.path.isfile(filedat) :
-#         raise ValueError(".DAT file :", filedat,"does not exist")
-#     if not os.path.isfile(filelbl) :
-#         raise ValueError(".LBL file :", filelbl,"does not exist")
-#     #____________
-
-
-#     # Main
-#     label = read_lbl(filelbl)
-#     qube  = pds_qube_lbl(label['QUBE'])
-
-#     # data_dims = (BAND, LINE, SAMPLE)
-#     # BAND   : Number of spectral pixels
-#     # LINE   : Number of spatial pixels
-#     # SAMPLE : Number of frames
-#     data_dims = ast.literal_eval(qube.CORE_ITEMS)
-
-#     # Binary type
-#     if   qube.CORE_ITEM_TYPE == 'IEEE_REAL'            and qube.CORE_ITEM_BYTES == 4 :
-#         data_type = np.float32
-#     elif qube.CORE_ITEM_TYPE == 'MSB_UNSIGNED_INTEGER' and qube.CORE_ITEM_BYTES == 2 :
-#         data_type = np.uint16
-#     else : raise ValueError("Unrecognized data type: "+str(qube.CORE_ITEM_TYPE))
-
-#     # Read
-#     data=read_binary_pds(filename_dat=filedat, data_dims=data_dims, data_type=data_type)
-#     # data[SAMPLE, LINE, BAND]
-
-#     if not no_extract :
-#         x1 = qube.UL_CORNER_BAND
-#         x2 = qube.UL_CORNER_BAND + (qube.LR_CORNER_BAND-qube.UL_CORNER_BAND+1) // qube.BAND_BIN - 1
-#         y1 = qube.UL_CORNER_LINE
-#         y2 = qube.UL_CORNER_LINE + (qube.LR_CORNER_LINE-qube.UL_CORNER_LINE+1) // qube.LINE_BIN - 1
-#         data = data[:,y1:y2,x1:x2]
-
-#     data_pds = pds_raw_data(data, label)
-#     return data_pds

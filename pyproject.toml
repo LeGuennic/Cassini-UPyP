@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cassini-upyp"
+version = "0.1.0"
+description = "Personal Cassini utilities for UPyP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+authors = [
+    { name = "Aodren" }
+]
+
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cassini_upyp*"]
+
+
+[tool.setuptools.package-data]
+cassini_upyp = ["py.typed"]

@@ -7,7 +7,6 @@ stars_dir       = '/home/aodren/CNRS/Software/Cassini_UPyP/resources'
 # SPICE KERNELS
 #--------------
 
-
 # SPICE KERNELS DIRECTORY
 kernels_dir = '/home/aodren/CNRS/Software/Cassini_UPyP/resources/spice_kernels'
 

@@ -10,10 +10,10 @@ import warnings
 from pathlib import Path
 from scipy.constants import astronomical_unit
 
-from Cassini_UPyP.lib.kernellib import *
-from Cassini_UPyP.lib.UVIS_main import UVIS_Observation
-import Cassini_UPyP.config.env as env
-import Cassini_UPyP.config.plotting as plotconfig
+from cassini_upyp.lib.kernellib import *
+from cassini_upyp.lib.main import UVIS_Observation
+import cassini_upyp.config.env as env
+import cassini_upyp.config.plotting as plotconfig
 from time import time
 
 
