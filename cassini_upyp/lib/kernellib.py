@@ -2,7 +2,7 @@ import spiceypy as spice
 import os
 from pathlib import Path
 
-from cassini_upyp.config.env  import kernels_dir
+from ..config.env  import kernels_dir
 
 mk_path = os.path.join(kernels_dir, 'mk')
 

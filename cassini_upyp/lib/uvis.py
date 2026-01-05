@@ -24,17 +24,16 @@ from pathlib import Path
 
 # Main modules
 import spiceypy as spice
-import matplotlib.pyplot as plt
 import numpy as np
 
 # Code libraries
-from cassini_upyp.lib.background import bg_fit, do_bg_fit
-from cassini_upyp.lib.utils import *
+from .background import bg_fit, do_bg_fit
+from .utils import *
 
-from cassini_upyp.config.uvis              import *
-from cassini_upyp.config.pipeline_defaults import *
+from ..config.uvis              import *
+from ..config.pipeline_defaults import *
 
-import cassini_upyp.config.env as env
+from ..config import env
 
 
 def correction_factor(N:int, log=True) -> float:
@@ -728,7 +727,7 @@ def smooth_spectrum(spectrum, kernel, mode='nearest'):
 
 
 
-class UVIS_bin:
+class UVIS_Bin:
     def __init__(self, bin_attributes, bin_boundaries, uvis_obs):
         self.bins = list_ndarray(bin_boundaries)
         self.bin_def = {key:bin_boundary for key,bin_boundary in zip(bin_attributes, bin_boundaries)}
@@ -902,6 +901,7 @@ class UVIS_bin:
 
 
     def plot_bin(self):
+        import matplotlib.pyplot as plt
 
         number_per_bin = np.where(self.number_per_bin == 0, "", self.number_per_bin.astype(str))
         number_per_bin = number_per_bin.T
@@ -1836,6 +1836,7 @@ class UVIS_Observation:
             ).reshape(self.n_pics, n_pixels)
         
     def plot_all_geometry(self, folder, out_format='png', duration=1/60):
+        import matplotlib.pyplot as plt
         from PIL import Image
         """
         Plot geometry for all exposures and save the results.
@@ -1921,6 +1922,7 @@ class UVIS_Observation:
 
     
     def plot_radiance_evolution(self, output_path=None, ylim=(0.01,20), yscale='log', wl_range=(1600,1900), method='trapezoid') :
+        import matplotlib.pyplot as plt
         """
         Plot the evolution of integrated radiance for each pixel over exposures.
 
@@ -2012,6 +2014,7 @@ class UVIS_Observation:
 
         from mpl_toolkits.axes_grid1 import make_axes_locatable
         from matplotlib.patches import Rectangle
+        from matplotlib import pyplot as plt
 
         integrated_radiance = self.integrate_radiance(wl_range=wl_range, method=method)
 

@@ -8,18 +8,24 @@ version = "0.1.0"
 description = "Personal Cassini utilities for UPyP"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = { file = "LICENSE" }
 
-authors = [
-    { name = "Aodren" }
+authors = [{ name = "Aodren" }]
+
+dependencies = [
+  "numpy>=1.23",
+  "scipy>=1.9",
+  "tqdm>=4.60",
+  "spiceypy>=6.0",
 ]
 
-dependencies = []
+[project.optional-dependencies]
+plot = ["matplotlib>=3.7"]
+dev = ["pytest>=7", "ruff>=0.5"]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cassini_upyp*"]
-
 
 [tool.setuptools.package-data]
 cassini_upyp = ["py.typed"]

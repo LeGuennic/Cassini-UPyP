@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
-import matplotlib.pyplot as plt
 import spiceypy as spice
 
 
@@ -10,10 +9,9 @@ import warnings
 from pathlib import Path
 from scipy.constants import astronomical_unit
 
-from cassini_upyp.lib.kernellib import *
-from cassini_upyp.lib.main import UVIS_Observation
-import cassini_upyp.config.env as env
-import cassini_upyp.config.plotting as plotconfig
+from .kernellib import *
+from .uvis import UVIS_Observation
+from ..config import env, plotting as plotconfig
 from time import time
 
 
@@ -49,6 +47,7 @@ def stars_pickles() :
 
 # Plot stars
 def plot_stars(stars_pickles, ax=None):
+    import matplotlib.pyplot as plt
     if ax is None : ax=plt.gca()
 
     ax.plot(stars_pickles()['tyRA'],stars_pickles()['tyDE'], **plotconfig.STAR_STYLE)
@@ -56,6 +55,7 @@ def plot_stars(stars_pickles, ax=None):
 
 # Pixels FOV
 def plot_pixels(pixels, ax=None, **kwargs) :
+    import matplotlib.pyplot as plt
     # Array indices : center, b_l, b_r, u_r, u_l
     if ax is None : ax=plt.gca()
 
@@ -1173,6 +1173,7 @@ class geometry:
              save=False, savename=None, show=True, scale=0.6,
              RA_range=None, DEC_range=None,
              ax=None, pixel_notes=False) :
+        import matplotlib.pyplot as plt
         
         frame = 'ORF' if mode in ['target', 'FOV', 'manual'] else 'RADEC'
         
