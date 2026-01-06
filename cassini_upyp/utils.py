@@ -118,10 +118,10 @@ def _repo_root() -> Path:
 
 def env_config():
     """Return the env.toml config as a module-like object."""
-    cfg_path = _repo_root() / "config" / "env.toml"
+    cfg_path = _repo_root() / "user_config" / "env.toml"
     return read_toml(cfg_path)
 
 def plot_config():
     """Return the plot.toml config as a module-like object."""
-    cfg_path = _repo_root() / "config" / "plotting.toml"
+    cfg_path = _repo_root() / "user_config" / "plotting.toml"
     return read_toml(cfg_path)
