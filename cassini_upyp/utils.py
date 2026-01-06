@@ -117,9 +117,16 @@ def _repo_root() -> Path:
 
 
 def env_config():
-    """Return the env.toml config as a module-like object."""
+    """Return the env.toml config as a module-like object (flattened)."""
     cfg_path = _repo_root() / "user_config" / "env.toml"
-    return read_toml(cfg_path)
+    cfg = read_toml(cfg_path)
+
+    # Flatten [paths] section for backward-compatible attributes
+    if hasattr(cfg, "paths") and isinstance(cfg.paths, dict):
+        for k, v in cfg.paths.items():
+            setattr(cfg, k, v)
+
+    return cfg
 
 def plot_config():
     """Return the plot.toml config as a module-like object."""
