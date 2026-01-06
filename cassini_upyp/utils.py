@@ -1,7 +1,13 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+import tomllib
+
 from typing import List, Tuple, Literal
 import numpy as np
 
-
+# DATA BINS UTILITIES -----
 def list_ndarray(bin_boundaries: Tuple[List[float], ...]) -> np.ndarray:
     """
     Create a NumPy array (dtype=object) where each cell is initialized as an empty list.
@@ -74,3 +80,48 @@ def find_bin_index(prop, boundaries, mode: Literal['center', 'all']) -> int:
         else:
             return None
 
+
+
+# CONFIGURATION UTILITIES -----
+def read_toml(path: str | Path):
+    """
+    Read a TOML file and return a module-like object:
+    - top-level keys -> attributes
+    - nested dicts remain dicts (matplotlib-friendly)
+    """
+
+    path = Path(path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Config not found: {path}")
+
+    with path.open("rb") as f:
+        data = tomllib.load(f)
+
+    for key, value in data.items():
+        if isinstance(value, dict):
+            continue
+        elif isinstance(value, list):
+            data[key] = np.array(value)
+        else:
+            data[key] = value
+
+    return SimpleNamespace(**data)
+
+
+def _repo_root() -> Path:
+    """Return the root of the Cassini_UPyP repo."""
+    # __file__ = .../cassini_upyp/utils.py
+    # parents[0] = .../cassini_upyp
+    # parents[1] = .../Cassini_UPyP  (repo root)
+    return Path(__file__).resolve().parents[1]
+
+
+def env_config():
+    """Return the env.toml config as a module-like object."""
+    cfg_path = _repo_root() / "config" / "env.toml"
+    return read_toml(cfg_path)
+
+def plot_config():
+    """Return the plot.toml config as a module-like object."""
+    cfg_path = _repo_root() / "config" / "plotting.toml"
+    return read_toml(cfg_path)

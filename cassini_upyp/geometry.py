@@ -11,8 +11,9 @@ from scipy.constants import astronomical_unit
 
 from .kernellib import *
 from .uvis import UVIS_Observation
-from ..config import env, plotting as plotconfig
-from time import time
+from .utils import env_config, plot_config
+env        = env_config()
+plotconfig = plot_config()
 
 
 # STARS AND PIXELS -------------------

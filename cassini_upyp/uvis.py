@@ -30,10 +30,10 @@ import numpy as np
 from .background import bg_fit, do_bg_fit
 from .utils import *
 
-from ..config.uvis              import *
-from ..config.pipeline_defaults import *
+from .config.uvis              import *
+from .config.pipeline_defaults import *
 
-from ..config import env
+env = env_config()
 
 
 def correction_factor(N:int, log=True) -> float:
@@ -1776,7 +1776,7 @@ class UVIS_Observation:
             A geometry object computed for the given time.
         """
         
-        from Cassini_UPyP.lib.UVIS_geometry import geometry
+        from .geometry import geometry
 
         return geometry( ET, u=self, **kwargs)
 
@@ -2239,7 +2239,7 @@ class UVIS_Observation:
             If the specified wavelength range is outside the detector range or if geometry is not initialized.
         """
 
-        from Cassini_UPyP.lib.UVIS_background import histogram, gaps, max_gap
+        from .background import histogram, gaps, max_gap
 
         if not (self.WL[0]<wl_range[0]<self.WL[-1] and self.WL[0]<wl_range[1]<self.WL[-1]) :
             raise ValueError(f'Please select a wl_range within the {self.channel} channel.')
@@ -2434,7 +2434,7 @@ class UVIS_Observation:
             raise ValueError("The number of 'keys' must match the number of 'bin_boundaries' sets.")
         
 
-        bins = UVIS_bin(keys,bin_boundaries, self)
+        bins = UVIS_Bin(keys,bin_boundaries, self)
 
         for i_pic in range(self.n_pics):
             for i_pix in range(self.n_pixels):

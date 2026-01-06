@@ -1,0 +1,91 @@
+# Configuration file used in plotting routine in UVIS_Geometry module
+# -------------------------------------------------------------------
+
+# VISIBLE OBJECTS IN FIELD OF VIEW
+FOV_objects = [
+  "SATURN", "EARTH", "SUN", "TITAN", "RHEA", "IAPETUS", "DIONE",
+  "TETHYS", "ENCELADUS", "MIMAS",
+]
+
+# Note: was numpy.array((0,75,0)) in plotting.py
+OFFSET = [0, 75, 0]
+
+# GRID TO PLOT LONGITUDE AND LATITUDE LINES ON TARGET
+lon_line_grid = [0, 60, 120, 180, 240, 300]
+lat_line_grid = [-60, -30, 0, 30, 60]
+
+# PLOTS CONFIGURATION
+
+# Latitude and longitude grid
+[LATLON_GRID]
+color = "black"
+linewidth = 0.5
+marker = "."
+markersize = 0.5
+ls = ""
+zorder = 3
+
+# Background color
+BACKGROUND_COLOR = "black"
+
+# Right ascension and declination lines
+[RADEC_LINES]
+color = "grey"
+ls = ""
+marker = "+"
+markersize = 2
+zorder = -100001
+
+# Stars style
+[STAR_STYLE]
+color = "white"
+linestyle = ""
+marker = "."
+markersize = 1
+zorder = -100000
+
+# UVIS star style
+[UV_STAR_STYLE]
+color = "purple"
+linestyle = ""
+marker = "."
+markersize = 1
+zorder = -99999
+
+# Planet style (per target)
+[PLANET_STYLE.DEFAULT]
+limb       = { color = "white", linewidth = 1, linestyle = "-" }
+day_side   = { color = "white" }
+night_side = { color = "gray" }
+terminator = { color = "black", linestyle = "--", linewidth = 1 }
+
+[PLANET_STYLE.SATURN]
+limb       = { color = "#EBD490", linewidth = 1, linestyle = "-" }
+day_side   = { color = "#EBD490" }
+night_side = { color = "gray" }
+terminator = { color = "black", linestyle = "--", linewidth = 1 }
+
+[PLANET_STYLE.EARTH]
+limb       = { color = "#254C7E", linewidth = 1, linestyle = "-" }
+day_side   = { color = "#254C7E" }
+night_side = { color = "gray" }
+terminator = { color = "black", linestyle = "--", linewidth = 1 }
+
+[PLANET_STYLE.SUN]
+limb       = { color = "yellow", linewidth = 1, linestyle = "-" }
+day_side   = { color = "white" }
+night_side = { color = "gray" }
+terminator = { color = "black", linestyle = "--", linewidth = 1 }
+
+[PLANET_STYLE.TITAN]
+limb       = { color = "#C7966A", linewidth = 1, linestyle = "-" }
+day_side   = { color = "#C7966A" }
+night_side = { color = "gray" }
+terminator = { color = "black", linestyle = "--", linewidth = 1 }
+
+# Miscellaneous
+[TARGET_CENTER]
+ls = ""
+marker = "+"
+color = "red"
+zorder = 1

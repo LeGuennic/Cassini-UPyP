@@ -2,7 +2,9 @@ import spiceypy as spice
 import os
 from pathlib import Path
 
-from ..config.env  import kernels_dir
+from .utils import env_config
+env = env_config()
+kernels_dir = env.kernels_dir
 
 mk_path = os.path.join(kernels_dir, 'mk')
 
