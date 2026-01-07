@@ -205,7 +205,7 @@ class AttrDict(dict):
             raise AttributeError(f"'AttrDict' object has no attribute '{key}'")
 
 
-class instrument(AttrDict):
+class Instrument(AttrDict):
     def __init__(self, instrument_name, n_pixels):
         self.name = instrument_name
 
@@ -850,7 +850,7 @@ class UVIS_Observation:
             case 'HIGH_RESOLUTION' : self.slit_ID = 'HI'
             case 'OCCLTATION'      : self.slit_ID = 'OCC'
         self.instrument_name = 'CASSINI_UVIS_'+self.channel+'_' + self.slit_ID
-        self.instrument = instrument(self.instrument_name, 64)
+        self.instrument = Instrument(self.instrument_name, 64)
 
 
         # Observation
@@ -1867,7 +1867,7 @@ class UVIS_Observation:
     # -------- BINNING
     def bin_pixels(
         self,
-        keys,
+        keys= ('lat', 'alt','lt'),
         bin_boundaries= (
             default_lat_bins,
             default_alt_bins,

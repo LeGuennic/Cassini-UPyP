@@ -10,7 +10,7 @@ from pathlib import Path
 from scipy.constants import astronomical_unit
 
 from ..kernellib import *
-from ..uvisutils import UVIS_Observation
+from ..uvisdata import UVIS_Observation
 from ..utils import env_config, plot_config
 env        = env_config()
 plotconfig = plot_config()
