@@ -17,7 +17,11 @@ env = env_config()
 
 
 # UNCERTAINTY
-def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0):
+def poisson_error(
+        x: ArrayLike,
+        bound: Literal["inf", "sup", "lower", "upper"],
+        sigma: float = 1.0
+) -> float | np.ndarray:
     """
     Compute Garwood confidence limits for a Poisson count.
 
@@ -35,6 +39,7 @@ def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0
         - 'inf' : lower confidence limit L.
         - 'sup' : upper confidence limit U.
         Aliases accepted: 'lower' -> 'inf', 'upper' -> 'sup'.
+        Input is case-insensitive and surrounding whitespace is ignored.
     sigma : float, optional
         Number of Gaussian sigmas corresponding to the *central* confidence
         level (two-sided). For example:
@@ -64,25 +69,38 @@ def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0
     - F. Garwood (1936). "Fiducial Limits for the Poisson Distribution."
       Biometrika, 28(3/4), 437–442.
     - G. Casella & R. L. Berger (2002). *Statistical Inference*, 2nd ed.
+
+    Raises
+    ------
+    ValueError
+        If `bound` is invalid, if `x` contains negative, non-finite, or
+        non-integer-valued entries, or if `sigma` is not a finite,
+        non-negative float.
     """
     
     from scipy.stats import chi2, norm
 
     # Normalize and validate bound
     b = bound.lower().strip()
-    if b in {"lower"}:
+    if b in {"inf", "lower"}:
         b = "inf"
-    elif b in {"upper"}:
+    elif b in {"sup", "upper"}:
         b = "sup"
-    if b not in {"inf", "sup"}:
-        raise ValueError("Invalid bound type. Use 'sup' or 'inf' (or 'upper'/'lower').")
+    else:
+        raise ValueError("Invalid bound type. Use 'inf'/'sup' or 'lower'/'upper'.")
 
     # Convert and validate x
     x_arr = np.asarray(x)
 
+    if not np.all(np.isfinite(x_arr)):
+        raise ValueError("`x` must contain finite values only.")
     if np.any(x_arr < 0):
         raise ValueError("`x` must be >= 0.")
-
+    
+    # Validate sigma
+    if not np.isfinite(sigma) or sigma < 0:
+        raise ValueError("`sigma` must be a finite, non-negative float.")
+    
     # Confidence level from sigma
     cl = norm.cdf(sigma) - norm.cdf(-sigma)
     alpha = 1 - cl
@@ -99,31 +117,64 @@ def poisson_error(x: ArrayLike, bound: Literal['inf', 'sup'], sigma: float = 1.0
         return float(np.asarray(res).item())
     return np.asarray(res, dtype=float)
 
-def correction_factor(N:int, log=True) -> float:
-    from scipy.special import gammaln, gamma
-
-
-    N = np.asarray(N, dtype=float)
-
-    if log:
-        log_ratio = gammaln((N - 1)/2) - gammaln(N/2)
-        return np.exp(log_ratio) * np.sqrt((N - 1)/2)
-    else:
-        return ( gamma((N - 1) / 2) /
-                 gamma(N / 2)        )  * np.sqrt((N - 1) / 2)
-
-
-# SPECTRUM
-def UVIS_WL(channel, bin=1) :
+def correction_factor(N: ArrayLike, log: bool = True) -> float | np.ndarray:
     """
-    Calculate the wavelength array for the specified UVIS channel.
+    Return the bias-correction factor κ(N) for the sample standard deviation.
+
+    For N Gaussian samples, the usual sample standard deviation s
+    (with denominator N - 1) underestimates the true σ. This function
+    returns κ(N) such that κ(N) * s is an unbiased estimator of σ
+    under the Gaussian assumption. As N → ∞, κ(N) → 1.
 
     Parameters
     ----------
-    channel : str
+    N : int or array-like of int
+        Sample size(s), expected to be ≥ 2.
+    log : bool, optional
+        If True (default), use the log-gamma function for numerical
+        stability, especially for large values of N. If False, use the regular gamma.
+
+    Returns
+    -------
+    float or numpy.ndarray
+        The correction factor κ(N), with the same shape as `N`.
+        Returns a float if `N` is scalar.
+    """
+    from scipy.special import gammaln, gamma
+
+    N_arr = np.asarray(N, dtype=float)
+    scalar_input = np.isscalar(N)
+
+    if log:
+        log_ratio = gammaln((N_arr - 1) / 2) - gammaln(N_arr / 2)
+        res = np.exp(log_ratio) * np.sqrt((N_arr - 1) / 2)
+    else:
+        res = (
+            gamma((N_arr - 1) / 2)
+            / gamma(N_arr / 2)
+            * np.sqrt((N_arr - 1) / 2)
+        )
+
+    if scalar_input:
+        return float(np.asarray(res).item())
+    return np.asarray(res, dtype=float)
+
+
+# SPECTRUM
+def UVIS_WL(channel: Literal["FUV", "EUV"], bin: int = 1) -> np.ndarray:
+    """
+    Calculate the wavelength array for the specified UVIS channel.
+
+    The wavelengths are computed from the optical model of the FUV/EUV
+    spectrograph for the 1024 detector columns. If `bin` > 1, the
+    wavelengths are averaged over contiguous groups of `bin` columns.
+
+    Parameters
+    ----------
+    channel : {"FUV", "EUV"}
         The UVIS channel for which to calculate wavelengths.
-        - 'FUV': Far     Ultraviolet channel.
-        - 'EUV': Extreme Ultraviolet channel.
+        - 'FUV': Far     Ultraviolet.
+        - 'EUV': Extreme Ultraviolet.
 
     bin : int, optional
         The binning factor. Default is 1 (no binning). If `bin` > 1, the wavelength array
@@ -175,36 +226,54 @@ def UVIS_WL(channel, bin=1) :
         case _:
             raise ValueError(f"Channel error, unknown UVIS channel : {channel}")
 
-def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertainty=False):
+def integrate_spectrum(
+    wl: ArrayLike,
+    s: ArrayLike,
+    wl_range: tuple[float, float] | None = None,
+    method: Literal["simpson", "trapezoid", "trapz"] = "simpson",
+    axis: int = 0,
+    uncertainty: bool = False
+) -> float | np.ndarray:
     """
-    Integrate the array `s` over the wavelength axis `wl`.
-    
+    Integrate a spectrum over wavelength with optional quadratic error propagation.
+
     Parameters
     ----------
-    wl : 1D array
-        Wavelength array.
-    s : array
-        Spectral data (if uncertainty=False) or uncertainty array (if uncertainty=True).
-        The dimension along `axis` must match the length of `wl`.
-    wl_range : tuple or None, optional
-        Tuple (min_wl, max_wl) defining the integration bounds in wavelength.
-        If None, integration is done over the full range of `wl`.
-    method : {'simpson', 'trapz'}, optional
-        Integration method. 'simpson' uses scipy.integrate.simpson,
-        'trapz' uses numpy.trapz.
+    wl : 1D array-like
+        Wavelength grid. Must have length equal to ``s.shape[axis]``.
+    s : array-like
+        Spectral data (if ``uncertainty=False``) or uncertainty array
+        (if ``uncertainty=True``). The dimension along `axis` must match
+        the length of `wl`.
+    wl_range : (float, float) or None, optional
+        Integration bounds in wavelength as (min_wl, max_wl). If None,
+        the integral is computed over the full `wl` range.
+    method : {"simpson", "trapezoid", "trapz"}, optional
+        Numerical integration method:
+        - "simpson"   : use ``scipy.integrate.simpson``,
+        - "trapezoid" : use ``numpy.trapezoid``,
+        - "trapz"     : alias for "trapezoid".
+        Default is "simpson".
     axis : int, optional
-        The axis along which to integrate. Must match the dimension of `wl`.
+        Axis along which to integrate. Default is 0.
     uncertainty : bool, optional
-        If True, `s` is interpreted as the uncertainty array. The output
-        is then the integrated uncertainty (quadratic sum under the integral).
-    
+        If False (default), `s` is interpreted as the spectrum and the
+        function returns the integral of `s(wl)`.
+        If True, `s` is interpreted as an uncertainty per wavelength bin.
+        The function then returns the integrated uncertainty, computed
+        by propagating variances under the integral (quadratic sum).
+
     Returns
     -------
-    float or array
-        Integrated value (or array of integrated values if there are extra dimensions).
-        - If uncertainty=False, it is the integral of the spectral data.
-        - If uncertainty=True, it is the total uncertainty computed by
-          sqrt( integral of s^2 ).
+    float or numpy.ndarray
+        Integrated value(s). A Python float is returned if all inputs
+        are effectively scalar along the integration axis.
+
+    Raises
+    ------
+    ValueError
+        If the wavelength and spectrum sizes do not match along `axis`,
+        or if an unknown integration method is requested.
     """
     
     wl = np.asarray(wl)
@@ -214,7 +283,7 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
         raise ValueError("The wavelength and spectrum arrays must have the same shape.")
     
 
-    # 1. Sélection de la plage de longueurs d'onde si wl_range est spécifié
+    # Select wavelength range if wl_range is specified
     if wl_range is not None:
         mask   = (wl >= wl_range[0]) * (wl <= wl_range[1])
         wl_sub = wl[mask]
@@ -223,7 +292,11 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
         wl_sub = wl
         s_sub  = s
 
-    # 2. En fonction de la méthode, on effectue l'intégration
+    # Normalize method aliases
+    if method == "trapz":
+        method = "trapezoid"
+
+    # Perform integration depending on the method
     if method == 'simpson':
         if len(wl_sub) < 3:
             raise ValueError("Simpson's method requires at least 3 points for integration.")
@@ -250,8 +323,7 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
             b = np.take(s_sub, indices_b, axis=axis)
             c = np.take(s_sub, indices_c, axis=axis)
             
-            # Expand delta_wl so it peut se diffuser correctement avec a, b, c
-            # On veut insérer des axes de taille 1 dans toutes les dimensions sauf celle d'intégration
+            # Expand delta_wl so it broadcasts along all axes except `axis`
             shape = [1] * s_sub.ndim
             shape[axis] = delta_wl.size
             delta_wl_expanded = delta_wl.reshape(shape)
@@ -293,24 +365,38 @@ def integrate_spectrum(wl, s, wl_range=None, method='simpson', axis=0, uncertain
 
 def interpolate_nans(arr, method: str = "linear"):
     """
-    Interpolate NaNs in each row of a 1-D or 2-D array.
+    Interpolate NaNs along the last axis of a 1-D or 2-D array.
+
+    For a 1-D input, interpolation is done along the single dimension.
+    For a 2-D input with shape (M, N), each row (size N) is treated
+    independently and interpolated over its NaN entries.
 
     Parameters
     ----------
     arr : array-like
-        Input data containing NaNs.
+        Input data containing NaNs. Cast to float internally.
     method : {"linear", "pchip"}, optional
-        Interpolation scheme to use (default: "linear").
+        Interpolation scheme to use:
+        - "linear": piecewise linear interpolation using ``np.interp``.
+        - "pchip" : monotonic piecewise cubic interpolation using
+          ``scipy.interpolate.PchipInterpolator``.
+        Default is "linear".
 
     Returns
     -------
     np.ndarray
-        Array with NaNs replaced by interpolated values.
-        If the input was 1-D, the output is 1-D.
+        Array with NaNs replaced by interpolated values. The output has
+        dtype float and the same shape as the input. If the input was
+        1-D, the output is 1-D.
+
+    Raises
+    ------
+    ValueError
+        If the input has more than 2 dimensions or if `method` is invalid.
     """
 
 
-    # -- standardise input ----------------------------------------------------
+    # Normalize input
     a = np.asarray(arr, dtype=float)
     if a.ndim > 2:
         raise ValueError("Only 1-D or 2-D arrays are supported.")
@@ -321,7 +407,7 @@ def interpolate_nans(arr, method: str = "linear"):
     x = np.arange(a.shape[1])         # common x-axis for all rows
     out = a.copy()
 
-    # -- choose interpolation routine ----------------------------------------
+    # Choose interpolation routine
     if method == "linear":
         for row in out:
             mask = np.isnan(row)
@@ -342,21 +428,31 @@ def interpolate_nans(arr, method: str = "linear"):
 
 
 # CALIBRATION
-def uvis_lab_calibration(channel:str, filename:str=None) :
+
+def uvis_lab_calibration(channel: Literal["FUV", "EUV"], filename: str | Path | None = None) -> dict[str, np.ndarray]:
         """
         Read laboratory calibration data for the specified UVIS channel and return sensitivity information.
 
-        Sensitivity in units of (counts/second) / (kilorayleigh)
-        This is the full-slit, low-resolution, monochromatic extended source sensitivity measured in the laboratory in 1997, 
-        and updated in 1999
+        The file contains the full-slit, low-resolution monochromatic
+        extended-source sensitivity measured in the laboratory (1997,
+        updated 1999), in units of (counts s-1) / (kilorayleigh).
 
         Parameters
         ----------
-        channel : str
-            The UVIS channel for which to read the calibration data. 'FUV' or 'EUV'.
-        filename : str, optional
-            The path to the calibration data file. If `None`, the default filename is constructed as
-            '{channel}_1999_Lab_Cal.dat'.
+        channel : {"FUV", "EUV"}
+            The UVIS channel for which to read the calibration data.
+        filename : str or pathlib.Path, optional
+            Path to the calibration data file. If None (default), the file
+            name is constructed as "{channel}_1999_Lab_Cal.dat" and looked
+            up in the default calibration files directory.
+
+        Returns
+        -------
+        dict of str -> numpy.ndarray
+            A dictionary with three 1D arrays:
+            - "WAVELENGTH"        : wavelength grid (Å),
+            - "SENSITIVITY"       : sensitivity (counts s⁻¹ / kR),
+            - "SENSITIVITY_ERROR" : uncertainty on the sensitivity.
         """
 
         if filename is None :
@@ -369,42 +465,52 @@ def uvis_lab_calibration(channel:str, filename:str=None) :
                 'SENSITIVITY'       : np.concatenate((data[:,1], data[:,4])),
                 'SENSITIVITY_ERROR' : np.concatenate((data[:,2], data[:,5]))}
 
-def get_cal_time_variation(channel:str, sctime) :
+def get_cal_time_variation(channel: Literal["FUV", "EUV"], sctime: float) -> np.ndarray:
     """
     Retrieve the spectral modulation array for a given UVIS channel and spacecraft time.
 
     This function reads calibration trending data from the IDL 'uvis_calibration_trending_v01_data.sav' computed from
     IDL routine uvis_calibration_trending_v01.pro and computes the spectral modulation
     (`specmod`) for the specified UVIS channel at a given spacecraft time (`sctime`).
-    It interpolates between the two closest calibration times to compute the spectral modulation.
+
+    The spectral modulation is interpolated linearly in time between
+    the two closest calibration epochs.
 
     Parameters
     ----------
-    channel : str
-        The UVIS channel for which to get the calibration time variation. 'FUV' or 'EUV'.
+    channel : {"FUV", "EUV"}
+        The UVIS channel for which to get the calibration time variation.
     sctime : float
         The spacecraft time in seconds for which to compute the spectral modulation.
 
     Returns
     -------
     numpy.ndarray
-        A NumPy array of size 1024 containing the spectral modulation values.
+        Spectral modulation array of length 1024 for the requested
+        `channel` and `sctime`.
 
     Notes
     -----
     - The calibration trending data is read from 'calibration_files/uvis_calibration_trending_v01_data.sav'.
-    - Spectral modulation ratios are interpolated linearly in time when necessary.
-    - If the `sctime` is outside the calibration data range, default values are used:
-      - Before the earliest time: an array of ones.
-      - After the latest time: the last available spectral modulation ratio.
+    - If `sctime` is earlier than the first calibration time, an array
+      of ones is returned.
+    - If `sctime` is later than the last calibration time, the last
+      available modulation ratio is used.
+    - Between two calibration times, the modulation is interpolated
+      linearly in time.
     """
 
     cal_file = Path(env.calibration_dir) / 'uvis_calibration_trending_v01_data.sav'
     cal_trend = readsav(cal_file)
 
 
-    arr = cal_trend.arr_fuv if channel=='FUV' else cal_trend.arr_euv
-    del cal_trend
+    if channel == "FUV":
+        arr = cal_trend.arr_fuv
+    elif channel == "EUV":
+        arr = cal_trend.arr_euv
+    else:
+        raise ValueError(f"Unknown UVIS channel: {channel!r} (expected 'FUV' or 'EUV').")
+
     sctime_mods = [arr[k].desc.sctime_sec_start[0] for k in range(len(arr))]
 
     if   sctime <  sctime_mods[0]  : specmod = np.ones(1024)
@@ -415,10 +521,9 @@ def get_cal_time_variation(channel:str, sctime) :
         specmod1 = arr[time_index-1].ratio
         specmod2 = arr[time_index  ].ratio
         specmod  = specmod1 + (specmod2 - specmod1) * (sctime - t1) / (t2 - t1)
-    del arr
     return specmod
 
-def get_ff_time_variation(channel:str, sctime) :
+def get_ff_time_variation(channel: Literal["FUV", "EUV"], sctime: float) -> np.ndarray:
     """
     Retrieve the flat-field (FF) time variation array for a given UVIS channel and spacecraft time.
 
@@ -428,7 +533,7 @@ def get_ff_time_variation(channel:str, sctime) :
 
     Parameters
     ----------
-    channel : str
+    channel : {"FUV", "EUV"}
         The UVIS channel for which to get the calibration time variation. 'FUV' or 'EUV'.
     sctime : float
         The spacecraft time in seconds for which to compute the flat-field modifier.
@@ -436,22 +541,38 @@ def get_ff_time_variation(channel:str, sctime) :
     Returns
     -------
     numpy.ndarray
-        A NumPy array of shape (64, 1024) containing the flat-field modifier values.
+        A NumPy array of shape (64, 1024) containing the flat-field modifier values, dtype float32.
 
     Notes
     -----
-    - The function searches for data files matching the pattern '*ff_modifier*.dat'.
-    - Spacecraft times are extracted from the filenames, assuming the time is embedded in positions -14 to -4 of the filename.
-    - If the `sctime` is outside the calibration data range:
-      - Before the earliest time: returns an array of ones.
-      - After the latest time: returns the flat-field modifier from the last available file.
-    - For times within the calibration data range, the flat-field modifier arrays are interpolated linearly in time.
-    - The 62nd row of the modifier array to ones (arrmod[61, :] = 1).
+    - Files are searched with the pattern ``f"*{channel}*ff_modifier*.dat"`` 
+      inside the calibration files directory.
+    - Spacecraft times are extracted from the last 10 characters of the
+      file stem (before the extension) and interpreted as integers.
+    - If `sctime` is earlier than the first available time, an array of
+      ones is returned.
+    - If `sctime` is later than the last available time, the modifier
+      from the last available file is returned.
+    - For times strictly within the calibration range, the modifier is
+      obtained by linear interpolation between the two nearest files in
+      time; in this case, the 62nd row is explicitly set to one
+      (``arrmod[61, :] = 1``).
+
+    Raises
+    ------
+    FileNotFoundError
+        If no flat-field modifier files are found for the specified channel.
     """
         
-    
     calibration_dir = Path(env.calibration_dir)
     fmods = list(calibration_dir.glob(f"*{channel}*ff_modifier*.dat"))
+    if not fmods:
+        raise FileNotFoundError(
+            f"No flat-field modifier files found for channel {channel!r} "
+            f"in {calibration_dir}"
+        )
+    
+    # Extract spacecraft times encoded in the filename
     sctime_mods = np.array([int(f.stem[-10:]) for f in fmods])
 
     # Sort fmods according to sctime_mods
@@ -459,12 +580,14 @@ def get_ff_time_variation(channel:str, sctime) :
     sctime_mods    = sctime_mods[sorted_indices]
     fmods          = [fmods[i] for i in sorted_indices]
 
-    if   sctime < sctime_mods[0]   : arrmod = np.ones((64, 1024), dtype=np.float32)
+
+    if   sctime < sctime_mods[0]   :
+        arrmod = np.ones((64, 1024), dtype=np.float32)
     elif sctime >= sctime_mods[-1] :
         with fmods[-1].open("rb") as f:
             arrmod = np.fromfile(f, dtype=np.float32, count=1024 * 64).reshape((64, 1024))
     
-    else :
+    else : # Linear interpolation in time between two calibration files
         time_index = np.searchsorted(sctime_mods, sctime)
         t1, t2 = sctime_mods[time_index-1], sctime_mods[time_index]
 
@@ -476,23 +599,23 @@ def get_ff_time_variation(channel:str, sctime) :
         arrmod[61,:]=1
     return arrmod
 
-def read_spica_ff(filename:str) :
+def read_spica_ff(filename:str | Path) -> np.ndarray:
     """
-    Read a flat-field calibration file from SPICA observations to account for 'starburn event',
-      and return its contents as a NumPy array.
+    Read a SPICA flat-field calibration file.
 
-    This function reads files 'FLATFIELD_XUV_POSTBURN.txt' or 'FLATFIELD_XUV_PREBURN.txt'
-    and returns the data as a NumPy array reshaped to dimensions (64, 1024).
+    This reads flat-field maps derived from SPICA observations used to
+    correct the UVIS detector after the starburn event, e.g.
+    ``FLATFIELD_XUV_PREBURN.txt`` or ``FLATFIELD_XUV_POSTBURN.txt``.
 
     Parameters
     ----------
-    filename : str
-        The path to the file to be read.
+    filename : str or pathlib.Path
+        Path to the flat-field file.
 
     Returns
     -------
     numpy.ndarray
-        A NumPy array of shape (64, 1024) containing the flat-field data.
+        Flat-field array of shape (64, 1024), dtype float.
     """
 
     # Initialize a list to store the values
@@ -510,7 +633,7 @@ def read_spica_ff(filename:str) :
     # Convert the list to a NumPy array and reshape to 64x1024
     return np.array(data).reshape(64, 1024)
 
-def smooth_spectrum(spectrum, kernel, mode='nearest'):
+def smooth_spectrum(spectrum: ArrayLike, kernel: ArrayLike, mode: Literal["reflect", "constant", "nearest", "mirror", "wrap"] ='nearest') -> np.ndarray:
     """
     Smooths spectral data by applying a 1D convolution along the spectral (last) dimension.
     
@@ -523,23 +646,23 @@ def smooth_spectrum(spectrum, kernel, mode='nearest'):
             - 3D: (nt, np, nwl)
     kernel : numpy.ndarray
         1D convolution kernel.
+    mode : {"reflect", "constant", "nearest", "mirror", "wrap"}, optional
+        Boundary handling mode passed to ``scipy.ndimage.convolve1d``.
+        Default is "nearest", see scipy.ndimage.convolve1d for more information.
     
     Returns
     -------
     numpy.ndarray
-        The smoothed spectrum.
-    
-    Notes
-    -----
-    Convolution is performed with the 'nearest' mode for boundary conditions by default.
-    See scipy.ndimage.convolve1d for more information.
+        The smoothed spectrum with the same shape as `spectrum`.
     """
+
+    spectrum = np.asarray(spectrum)
+    kernel   = np.asarray(kernel, dtype=float)
 
     if spectrum.ndim not in (1, 2, 3):
         raise ValueError("Input array must have at most 3 dimensions.")
     
     spectral_axis = spectrum.ndim - 1
     return convolve1d(spectrum, kernel, axis=spectral_axis, mode=mode)
-
 
 

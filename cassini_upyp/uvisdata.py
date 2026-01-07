@@ -47,63 +47,62 @@ from .config.uvis import (
 from .utils import env_config, list_ndarray, find_bin_index
 env = env_config()
 
-def pds_lbl(labelfile:str) :
+def pds_lbl(labelfile: str | Path) -> "AttrDict":
     """
     Parse a PDS3-formatted LBL (Label) file and return its contents as a nested dictionary.
 
-    This function reads a PDS3 LBL file line by line, extracting key-value pairs and storing them in a dictionary.
-    Multi-line values are concatenated into single strings, and numerical values with units (e.g., "<KM>", "<DEGREE>")
-    are stored as strings for easy post-processing. The function also handles nested objects like QUBE structures
-    by organizing them into sub-dictionaries for structured data access.
-
     Parameters
     ----------
-    file_path : str
-        The path to the LBL file to be parsed.
+    labelfile : str or pathlib.Path
+        Path to the PDS3 .LBL file.
 
     Returns
     -------
-    dict
-        A nested dictionary containing the parsed content of the LBL file. Top-level keys represent main attributes,
-        and sub-dictionaries are created for nested objects (e.g., "QUBE").
+    AttrDict
+        Nested dictionary-like object with attribute access. Top-level
+        keys are the main label fields; nested OBJECT blocks are stored
+        as sub-AttrDicts.
 
     Examples
     --------
-    >>> lbl_data = read_lbl("path/to/your_file.lbl")
-    >>> print(lbl_data["TARGET_NAME"])
-    TITAN
-    >>> print(lbl_data["QUBE"]["AXES"])
+    Load a label and access a top-level field and a nested object:
+
+    >>> lbl = pds_lbl("path/to/label.lbl")
+    >>> lbl.TARGET_NAME
+    'TITAN'
+    >>> lbl.QUBE.AXES
     3
 
     Notes
     -----
-    - This parser is tailored for PDS3 LBL files and may not handle other formats like PDS4 or complex binary data.
-    - Fields with multi-line values are concatenated; unit strings (e.g., "<KM>") remain as part of the values.
-    - Single numerical values are automatically converted to float or integer
-    - For complex objects like `QUBE`, the function creates sub-dictionaries with attributes accessible as nested keys.
+    - Unit strings in angle brackets (e.g. "<KM>", "<DEGREE>") are
+      preserved as part of the string values.
+    - Only a simple OBJECT / END_OBJECT nesting model is supported; this
+      is sufficient for the UVIS labels used in this package.
     """
 
     label  = AttrDict({})
     obj    = label
     nested = False
 
-    with open(labelfile, 'r') as f :
-        for line in f :
+    labelfile = Path(labelfile).expanduser()
+    with labelfile.open("r") as f:
+        for line in f:
             line = line.strip()
             if line.strip() =='END' : break
 
             # ^ at the begining indicates a nested object
-            if line.startswith('^') :
+            if line.startswith('^'):
                 nested = True
             
-            elif '=' in line and not line.startswith('^') :
+            elif '=' in line and not line.startswith('^'):
 
                 key, value = line.split('=', 1)
                 key   = key.strip()
                 value = value.strip(' "')
 
                 # Convert UNK and N/A into None
-                if 'UNK' in value or 'N/A' in value :
+                if 'UNK' in value or 'N/A' in value:
                     value = None
                 # Convert what we can in numbers
                 try:
@@ -114,60 +113,69 @@ def pds_lbl(labelfile:str) :
                     except (ValueError, TypeError): pass
                 
 
-                if key == "OBJECT" and nested :
+                if key == "OBJECT" and nested:
                     obj[value]=AttrDict({})
                     obj = obj[value]
-                elif key == "END_OBJECT" :
+                elif key == "END_OBJECT":
                     nested=False
                     obj=label
                 else : obj[key]  = value
 
 
             elif "=" not in line and not line.startswith('^') :
+                # Continuation of the previous key's value (multi-line field)
                 if obj[key] == '' : obj[key] += line.strip('"')
                 else : obj[key] += ' '+line.strip('"')
+
     return AttrDict(label)
 
-def read_binary_pds(filename_dat, data_dims, data_type, endian='big'):
+def read_binary_pds(filename_dat: str | Path, data_dims: tuple[int, int, int], data_type: str | np.dtype, endian: Literal['big', 'little'] = 'big') -> np.ndarray | None:
     """
     Read a binary PDS (Planetary Data System) data file and return its contents as a NumPy array.
 
-    This function reads binary data from a PDS file and reshapes it into a data cube based on the specified dimensions.
-    It handles the byte order (endianness) and data type to correctly interpret the binary data.
+    This function reads binary data from a PDS file and reshapes it into a data cube based on the 
+    specified dimensions. It handles the byte order (endianness) and data type to correctly 
+    interpret the binary data.
 
     Parameters
     ----------
-    filename_dat : str
-        The path to the binary PDS data file.
-    data_dims    : tuple of ints
-        A tuple containing the dimensions of the data in the order (BAND, LINE, SAMPLE).
-    data_type    : str or numpy.dtype
-        The data type of the binary data (e.g., 'float32', 'int16').
-    endian       : str, optional
-        The byte order of the data. Can be 'big' or 'little'. Default is 'big'.
+    filename_dat : str or pathlib.Path
+        Path to the binary PDS data file.
+    data_dims : tuple of int
+        Dimensions of the data in the order (BAND, LINE, SAMPLE).
+        - BAND   : Number of spectral pixels
+        - LINE   : Number of spatial pixels  
+        - SAMPLE : Number of exposures
+        
+    data_type : str or numpy.dtype
+        Data type of the binary data (e.g. "float32", "int16").
+    endian : {"big", "little"}, optional
+        Byte order of the data. Default is "big".
 
     Returns
     -------
     numpy.ndarray or None
-        A NumPy array containing the data reshaped into a cube with dimensions (SAMPLE, LINE, BAND).
-        Returns `None` if there is an error in reading or reshaping the data.
+        A NumPy array containing the data reshaped into a cube with dimensions 
+        (SAMPLE, LINE, BAND). Returns `None` if there is an error in reading 
+        or reshaping the data.
 
     Notes
     -----
-    - The function reads the binary data from the specified file, interprets it using the given data type and endianness,
-      and reshapes it according to the provided dimensions.
-    - The dimensions should be provided in the order (BAND, LINE, SAMPLE), but the resulting array will have the shape
-      (SAMPLE, LINE, BAND).
-    - If an error occurs during file reading or data reshaping, the function prints an error message and returns `None`.
+    The dimensions should be provided in the order (BAND, LINE, SAMPLE), but the 
+    resulting array will have the shape (SAMPLE, LINE, BAND).
 
     Examples
     --------
-    Read a binary PDS file with specified dimensions and data type:
-
-    >>> data_cube = read_binary_pds('data.dat', (3, 64, 1024), 'float32')
-    >>> if data_cube is not None:
-    ...     print(data_cube.shape)
+    >>> cube = read_binary_pds("data.dat", (3, 64, 1024), "float32")
+    >>> cube.shape
     (1024, 64, 3)
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    ValueError
+        If the data cannot be reshaped to the requested dimensions.
     """
 
     # Détermine endianess
@@ -176,19 +184,28 @@ def read_binary_pds(filename_dat, data_dims, data_type, endian='big'):
     BAND, LINE, SAMPLE = data_dims
 
     # Read the file as a data cube
-    try:
-        with open(filename_dat, 'rb') as f:
-            data = np.fromfile(f, dtype=dtype)
-            # Reshape the data according to the specified dimensions
-            data_cube = data.reshape((SAMPLE, LINE, BAND))
-    except Exception as e:
-        print(f"Error reading : {e}")
-        return None
+    with filename_dat.open("rb") as f:
+        data = np.fromfile(f, dtype=dtype)
+
+    # This will raise ValueError if the size does not match
+    data_cube = data.reshape((SAMPLE, LINE, BAND))
 
     return data_cube
 
 
 class AttrDict(dict):
+    """
+    Dictionary with attribute-style access.
+
+    Keys can be accessed both as dictionary items and as attributes:
+
+        d["KEY"] <-> d.KEY
+
+    This is mainly used for convenience when working with parsed PDS
+    labels, where fields like TARGET_NAME or QUBE.AXES are accessed
+    as attributes.
+    """
+
     def __getattr__(self, key):
         try:
             return self[key]
@@ -206,118 +223,103 @@ class AttrDict(dict):
 
 
 class Instrument(AttrDict):
-    def __init__(self, instrument_name, n_pixels):
+    """
+    UVIS-like instrument description based on SPICE kernels.
+
+    This class queries the SPICE instrument kernel to retrieve:
+    - instrument ID code,
+    - field of view (shape, frame, boresight, corners),
+    - total FOV height/width (in degrees),
+    - per-pixel angular size,
+    - pixel corner directions in the instrument frame.
+
+    The pixel grid is assumed to be a 1-D slit with `n_pixels` samples
+    along the spatial direction. Pixel corners are computed in angular
+    coordinates and converted to unit vectors in the instrument frame.
+    """
+
+    def __init__(self, instrument_name: str, n_pixels: int = 64) -> None:
         self.name = instrument_name
 
-
+        # Load instrument kernel and resolve ID
         spice.furnsh(env.ik_path)
         self.ID = spice.bodn2c(instrument_name)
         
-        
-
-        # Get parameters in degree
+        # Get FOV geometry in instrument frame
+        # shape: string, frame: string,
+        # bsight: boresight vector, bounds: FOV corners
         self.shape, self.frame, self.bsight, self.bounds, self.corners = spice.getfov(self.ID, 4)
         self.corners = np.array(self.corners)
         self.bsight  = np.array(self.bsight)
 
-
+        # Get half-angles in degrees
         fov_h_angle = spice.gdpool(f'INS{self.ID}_FOV_REF_ANGLE',   0, 1)[0] 
         fov_w_angle = spice.gdpool(f'INS{self.ID}_FOV_CROSS_ANGLE', 0, 1)[0]
         
         self.fov_height = 2 * fov_h_angle # In degrees
         self.fov_width  = 2 * fov_w_angle
 
-        self.pixel_height = self.fov_height / n_pixels
+        self.n_pixels = int(n_pixels)
+        self.pixel_height = self.fov_height / self.n_pixels
         self.pixel_width  = self.fov_width
 
         spice.unload(env.ik_path)
+
+
         # COMPUTE PIXEL CORNERS IN INSTRUMENT FRAME
         #------------------------------------------
-        # Array indices : center, b_l, b_r, u_r, u_l
+        # Array indices order:
+        # center, bottom-left, bottom-right, upper-right, upper-left
 
         # Pixel corners in angles (theta, phi)
-        pixels_angles = np.zeros((n_pixels,5,2))
+        pixels_angles = np.zeros((self.n_pixels, 5, 2))
         bc = [0, -fov_h_angle] # Bottom center point
 
-        index = np.arange(64)
+        index = np.arange(self.n_pixels)
 
         # theta
-        pixels_angles[:, :, 0] = np.array([0, -fov_w_angle, fov_w_angle, fov_w_angle, -fov_w_angle])
-        # phi
-        pixels_angles[:, 0,   1] = self.pixel_height * (.5 + index)            # Center
+        pixels_angles[:, :, 0] = np.array(
+            [0, -fov_w_angle, fov_w_angle, fov_w_angle, -fov_w_angle]
+        )
+
+        # phi (vertical angle)
+        pixels_angles[:, 0,   1] = self.pixel_height * (.5 + index)                # Center
         pixels_angles[:, 1:3, 1] = self.pixel_height *       index [:, np.newaxis] # Bottom
         pixels_angles[:, 3:5, 1] = self.pixel_height * ( 1 + index)[:, np.newaxis] # Top
-        pixels_angles += bc
+        pixels_angles += bc # Shift all angles by bottom-center offset
+
+        # Convert to radians
+        theta = np.radians(pixels_angles[:, :, 0])
+        phi   = np.radians(pixels_angles[:, :, 1])
 
         # Pixel corners in cartesian coordinates
-        theta = pixels_angles[:, :, 0]*np.pi/180
-        phi   = pixels_angles[:, :, 1]*np.pi/180
-
         pixels_corners = np.stack([
             np.sin(theta) * np.cos(phi),
             np.sin(phi),
             np.cos(theta) * np.cos(phi)
         ], axis=-1)
         
-        # Normalise vectors
-        self.pixels_corners = pixels_corners / 1#np.linalg.norm(pixels_corners, axis=-1, keepdims=True)
+        self.pixels_corners = pixels_corners # / np.linalg.norm(pixels_corners, axis=-1, keepdims=True)
 
 
 class pds_raw_data:
     """
-    A class to represent and process raw PDS (Planetary Data System) data from the Cassini UVIS instrument.
+    Raw PDS (Planetary Data System) data from the Cassini UVIS instrument.
 
-    This class stores raw data and metadata extracted from PDS files (.DAT and .LBL) and provides methods for
-    calibrating the data according to the instrument's specifications and calibration files.
+    This class wraps:
+    - the raw detector counts read from the .DAT file,
+    - the label metadata parsed from the .LBL file,
+    - a convenient view of the QUBE structure,
+    - basic derived quantities (channel, slit state, pixel bandpass,
+      slit ratio, integration duration, etc.),
+    and provides methods (e.g. ``get_calibration``) to build calibrated
+    UVIS spectra.
 
-    Can be initialized from DAT and LBL file with read_pds() function.
-
-    Attributes
-    ----------
-    raw_data : numpy.ndarray
-        The raw counts data loaded from the PDS .DAT file.
-    calibrated_data : numpy.ndarray
-        UVIS spectra
-    
-    {attribute} : str or int or float
-        Metadata from the .LBL file
-    qube : pds_qube_lbl
-        An object containing the QUBE metadata extracted from the .LBL file.
-    channel : str
-        The UVIS channel ('FUV' or 'EUV') determined from the NAME attribute in the label.
-    pix_bandpass : numpy.ndarray
-        The pixel bandpass values for the specified channel.
-    slit_ratio : float
-        The slit width ratio for the specified channel and slit state.
-    sctime_sec_start : float
-        The spacecraft clock time (in seconds) at the start of data acquisition.
-    SPA_UL, SPA_LR, SPE_UL, SPE_LR : int
-        Aliases for the sensor pixels' corner positions, as specified in the label.
-
-    Methods
-    -------
-    get_calibration(interp='linear', flat_field=True)
-        Retrieve the calibration multiplier for the raw data based on the instrument's sensitivity and time variation.
-
-    Notes
-    -----
-    - The class automatically extracts and computes several attributes from the provided label data.
-    - The `get_calibration` method calculates the calibration factors considering lab calibration, time variation,
-      flat-field corrections, and binning.
-    - FUV channel data may contain 'evil' pixels with anomalous behavior; these are handled during calibration.
-
-    Examples
-    --------
-    Initialize a `pds_raw_data` object and retrieve calibration data:
-
-    >>> data_pds = pds_raw_data(data, label)
-    >>> calibration = data_pds.get_calibration()
-
-    Initialize a `pds_raw_data` object from binary data and label file:
-    >>> data_pds = read_pds('FUV2006_015_14_47')
+    Typical usage is via the ``read_pds`` function, which constructs a
+    :class:`pds_raw_data` from matching .DAT/.LBL files.
     """
 
-    def __init__(self, filename:str=None, file2:str=None, no_extract=False) :
+    def __init__(self, filename: str | Path = None, file2: str | Path = None, no_extract: bool = False) -> None:
         """
         Read PDS (Planetary Data System) raw files from the Cassini UVIS instrument.
 
@@ -327,34 +329,28 @@ class pds_raw_data:
 
         Parameters
         ----------
-        filename : str
-            The path to the label (.LBL) or binary (.DAT) file to read, with or without file extension.
-            If given without an extension, both files are assumed to have the same name with their respective extensions.
-
-        file2 : str, optional
-            The path to the second file (either .DAT or .LBL) if `filename` is given with an extension (.DAT or .LBL).
-            This allows specifying both files explicitly when they have different names or locations.
-
+        filename : str or Path
+            Either:
+            - base filename without extension (e.g. "FUV2006_015_14_47"),
+              in which case ``<name>.DAT`` and ``<name>.LBL`` are used, or
+            - path to a .DAT or .LBL file. In that case, `file2` must be
+              the corresponding .LBL or .DAT file.
+        file2 : str or pathlib.Path, optional
+            Second file (the .DAT or .LBL matching `filename`) when
+            `filename` is given with an extension. Default is None.
         no_extract : bool, optional
-            If `True`, the data is not extracted based on window boundaries specified in the label.
-            Default is `False`.
-
-        Returns
-        -------
-        pds_raw_data
-            An object containing the raw data and metadata, with attributes and methods for further processing.
+            If False (default), the raw data cube is spatially/spectrally
+            cropped according to the window boundaries and binning
+            parameters given in the label. If True, the full cube as
+            stored in the .DAT file is kept.
 
         Raises
         ------
         ValueError
-            If the required files are not provided, cannot be found, or if the data type is unrecognized.
-
-        Notes
-        -----
-        - The function pairs the .DAT and .LBL files automatically if only one is specified without an extension.
-        - The data is read and stored as a NumPy array, with dimensions adjusted according to the label information.
-        - If `no_extract` is `False`, the data is extracted based on the window boundaries and binning specified in the label.
-
+            If the .DAT/.LBL pairing is invalid, if one of the files is
+            missing, or if the CORE_ITEM_TYPE / CORE_ITEM_BYTES
+            combination is not recognized.
+        
         Examples
         --------
         Read a PDS file set by specifying the base filename without extension:
@@ -364,7 +360,6 @@ class pds_raw_data:
         Read a PDS file set by specifying both the label and data files explicitly:
 
         >>> data_pds = pds_raw_data('data_file.DAT', 'label_file.LBL')
-
         """
 
         filename = Path(filename)
@@ -405,7 +400,7 @@ class pds_raw_data:
         # data_dims = (BAND, LINE, SAMPLE)
         # BAND   : Number of spectral pixels
         # LINE   : Number of spatial pixels
-        # SAMPLE : Number of frames
+        # SAMPLE : Number of exposures
         data_dims = ast.literal_eval(self.qube.CORE_ITEMS)
 
         # Binary type
@@ -428,18 +423,7 @@ class pds_raw_data:
             self.raw_data = self.raw_data[:,y1:y2,x1:x2]
         #_______________________________________________
 
-        # OTHER ATTRIBUTES
-        # Data from files
-        
-
-        self.calibrated_data = np.copy(self.raw_data)
-
-        self.calibration       = None
-        self.calibration_error = None
-        self.is_calibrated = False
-
-
-        # Compute other data
+        # Misc attributes -----
         self.sctime_sec_start = float(self.label.SPACECRAFT_CLOCK_START_COUNT.split('/')[-1])
 
         self.channel      = 'FUV' if 'FUV' in self.label.PRODUCT_ID else 'EUV'
