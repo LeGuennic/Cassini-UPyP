@@ -1252,9 +1252,9 @@ class UVIS_Observation:
             A geometry object computed for the given time.
         """
         
-        from .geometry.geometry import geometry
+        from .geometry import Geometry
 
-        return geometry( ET, u=self, **kwargs)
+        return Geometry( ET, u=self, **kwargs)
 
     def set_geometry(self, et_range=None, **kwargs) :
         """
@@ -1312,8 +1312,6 @@ class UVIS_Observation:
             ).reshape(self.n_pics, n_pixels)
         
     def plot_all_geometry(self, folder, out_format='png', duration=1/60):
-        import matplotlib.pyplot as plt
-        from PIL import Image
         """
         Plot geometry for all exposures and save the results.
 
@@ -1326,6 +1324,8 @@ class UVIS_Observation:
         duration : float, optional
             Duration per frame for GIF animation (in seconds). Default is 1/60.
         """
+        import matplotlib.pyplot as plt
+        from PIL import Image
 
         folder = Path(folder)
         if not folder.exists() :
@@ -1398,7 +1398,6 @@ class UVIS_Observation:
 
     
     def plot_radiance_evolution(self, output_path=None, ylim=(0.01,20), yscale='log', wl_range=(1600,1900), method='trapezoid') :
-        import matplotlib.pyplot as plt
         """
         Plot the evolution of integrated radiance for each pixel over exposures.
 
@@ -1415,7 +1414,7 @@ class UVIS_Observation:
         method : {'simpson', 'trapz'}, optional
             Integration method to use. Default is 'simpson'.
         """
-
+        import matplotlib.pyplot as plt
         from matplotlib.backends.backend_pdf import PdfPages
         integrated_radiance = self.integrate_radiance(wl_range=wl_range, method=method)
 

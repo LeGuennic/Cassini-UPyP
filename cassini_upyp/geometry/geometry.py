@@ -43,7 +43,7 @@ def stars_pickles():
         If the file 'stars_pickles.npy' does not exist in the specified directory.
     """
 
-    star_file = Path(env.stars_dir) / 'stars.npy'
+    star_file = Path(env.star_file) # stars.npy
     
     if not star_file.exists():
         raise FileNotFoundError(f"File not found: {star_file}")

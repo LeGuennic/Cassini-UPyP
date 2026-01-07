@@ -155,7 +155,6 @@ def yd_to_et(year, doy, hour=0, minute=0, second=0):
     Convert UTC year and day-of-year to ephemeris time (ET, seconds past J2000 TDB).
     Accepts optional time-of-day. Uses ISO 8601 DOY format with 'Z' (UTC).
     """
-    import os
     import calendar
     import spiceypy as spice
 
