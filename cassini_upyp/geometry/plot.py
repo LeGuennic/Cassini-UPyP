@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-from .visibility import is_in_frame
+from .computational import is_in_frame
 from ..utils import plot_config
 plotconfig = plot_config()
 
