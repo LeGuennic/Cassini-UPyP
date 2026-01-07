@@ -1,12 +1,11 @@
 import spiceypy as spice
-import os
 from pathlib import Path
 
 from .utils import env_config
 env = env_config()
 kernels_dir = env.kernels_dir
 
-mk_path = os.path.join(kernels_dir, 'mk')
+mk_path = Path(kernels_dir) / 'mk'
 
 
 # KERNELS -----------------
@@ -21,7 +20,6 @@ def ckernel_covers_yd(ckernel:str, year:str, doy:str) :
     target_date = int(year[-2:]) * 1000 + int(doy)
     
     return ysta * 1000 + dsta <= target_date <= ysto * 1000 + dsto
-
 
 def ckernel_covers_et(ckernel:str, et:float) :
 
@@ -50,6 +48,7 @@ def spkernel_covers_et(spkernel:str, et:float, obj_id=-82) :
         if start_et <= et <= end_et:
             return True
     return False
+
 
 def metakernel(et, save=False, savefile: str = None, filter_yd=None):
     """Build the list of kernels to load and optionally write a SPICE meta-kernel.
@@ -145,11 +144,10 @@ def metakernel(et, save=False, savefile: str = None, filter_yd=None):
         metakernel_content += ")\n\\begintext"
 
         # Write file with Path.write_text
-        metakernel_path = Path(mk_path) / savefile
+        metakernel_path = mk_path / savefile
         metakernel_path.write_text(metakernel_content)
 
     return kernels_to_load
-
 
 
 def yd_to_et(year, doy, hour=0, minute=0, second=0):
@@ -179,29 +177,14 @@ def yd_to_et(year, doy, hour=0, minute=0, second=0):
     # Example: "2009-274T00:00:00.000Z"
     utc_str = f"{y:04d}-{d:03d}T{h:02d}:{m:02d}:{s:06.3f}Z"
 
-    lsk_path = os.path.join(kernels_dir, "lsk", "naif0012.tls")
+    lsk_path = Path(kernels_dir) / "lsk" / "naif0012.tls"
 
     # Load LSK just for the conversion; ensure unload even if parsing fails
-    spice.furnsh(lsk_path)
+    spice.furnsh(str(lsk_path))
     try:
         et = spice.str2et(utc_str)
     finally:
-        spice.unload(lsk_path)
+        spice.unload(str(lsk_path))
 
     return et
-
-
-if __name__ == "__main__":
-    e = yd_to_et(2009, 274)
-    mk = metakernel(e, filter_yd=(2009, 274))
-
-    mk = [Path(e) for e in mk]
-
-    from shutil import copy2
-    dest_dir = Path.home() / 'test'
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    for src in mk:
-        if src.is_file():
-            copy2(src, dest_dir / src.name)
 
