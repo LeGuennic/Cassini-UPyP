@@ -489,7 +489,7 @@ class UVIS_Bin:
         self.bin_averaged   = False
         self.bin_integrated = False
 
-    def average_bins(self):
+    def average(self):
         """
         Compute per-bin mean spectra and uncertainties.
 
@@ -2186,7 +2186,7 @@ class UVIS_Observation:
 
             # Initialize bins
             shape = tuple(len(bounds) - 1 for bounds in bin_boundaries)
-            bins = UVIS_Bin(shape, self, bin_attributes=keys, bin_boundaries=bin_boundaries)
+            bins = UVIS_Bin(shape, self)
             bins.bin_def = {key:bin_boundary for key,bin_boundary in zip(keys, bin_boundaries)}
 
             for i_pic in range(self.n_pics):
