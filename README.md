@@ -10,14 +10,14 @@ An example notebook is available in example/example.ipynb.
 
 This repository relies on user-editable TOML configuration files stored in user_config/:
 
-- user_config/env.toml
-- user_config/plotting.toml
+- `user_config/env.toml`
+- `user_config/plotting.toml`
 
 At runtime, the code reads these files relative to the repository root (detected from cassini_upyp/utils.py). Because of that, a standard non-editable installation (pip install .) is not the intended mode of use: you would end up having to edit configuration files inside site-packages, which is fragile and discourages experimentation.
 
 Supported/recommended workflows are therefore:
 - add the repository to PYTHONPATH, or
-- install the repository in editable mode (pip install -e .)
+- install the repository in editable mode (`pip install -e .`)
 
 ## Requirements
 
@@ -31,15 +31,22 @@ Option A (recommended): editable install
 
 From the repository root:
 
+
+```bash
 python -m pip install -e .
+```
 
 With plotting extras:
 
+```bash
 python -m pip install -e ".[plot]"
+```
 
 Option B: add the repository to PYTHONPATH
 
+```bash
 export PYTHONPATH="/path/to/Cassini-UPyP:$PYTHONPATH"
+```
 
 Make sure you keep the repository layout intact (cassini_upyp/ and user_config/ must remain at the same level).
 
@@ -150,3 +157,8 @@ example/
 If you are using this in your own research, you are encouraged to modify the code locally to match your scientific assumptions and workflow.
 
 This project is under active development; the API may evolve.
+
+
+## Notice on AI
+
+AI LLM (Large Language Model) tools were used during development to help draft and edit documentation (docstrings, README, commits, ...), to suggest refactoring and optimizations for parts of the codebase, and to improve spelling and style. All changes (including this paragraph) were reviewed, modified, corrected, adapted and integrated by the author, who remains responsible for the final content and implementation.
