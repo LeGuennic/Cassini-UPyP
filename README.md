@@ -95,52 +95,56 @@ In both cases, you must at minimum provide a valid LSK and SCLK, and ensure that
 
 Create an observation from one or more UVIS PDS base paths (with or without extension). Each product is expected to have matching .LBL and .DAT files.
 
+```
 from cassini_upyp import UVIS_Observation
 
 obs = UVIS_Observation(
     "/path/to/FUV2006_015_14_47_PRIME"
 )
+```
 
 You can also pass multiple files:
 
+```
 obs = UVIS_Observation(
     "/path/to/file_1",
     "/path/to/file_2",
 )
+```
 
 Or use a batch list file (one base path per line), using paths relative to the batch file directory or absolute paths:
 
-obs = UVIS_Observation(batch="/path/to/batch_list.txt")
+`obs = UVIS_Observation(batch="/path/to/batch_list.txt")`
 
 Typical processing steps depend on what you need, but the workflow generally includes:
 - background estimation/removal
 - radiometric calibration
 - geometry (SPICE-based)
 
-Refer to example/example.ipynb for a more complete run-through.
+Refer to `example/example.ipynb` for a more complete run-through.
 
 ## Repository layout
 
+```
 cassini_upyp/
   uvisdata.py            Main classes (UVIS_Observation, UVIS_Bin) and I/O logic
   uvisutils.py           Spectral utilities, calibration helpers, uncertainties
-  background.py          Background fit/removal helpers
+  background.py          Background noise fit/calculation helpers
   kernellib.py           SPICE/kernel handling logic
-  geometry/              SPICE-based geometry and plotting helpers
+  geometry/              SPICE-based geometry and plotting routine
   config/                Code-side defaults and instrument constants
 
 user_config/
   env.toml               User paths (kernels, calibration files, star file)
-  plotting.toml           Plotting configuration (styles, visible objects, grids)
+  plotting.toml          Plotting configuration (styles, visible objects, grids)
 
 example/
   example.ipynb          Example workflow notebook
   data/                  Small example data (if present)
+```
 
 ## Modifying the code / contributing
 
-If you are using this in your own research:
-- you are encouraged to modify the code locally to match your scientific assumptions and workflow,
-- if you fix a bug or add a generally useful feature, issues and pull requests are welcome.
+If you are using this in your own research, you are encouraged to modify the code locally to match your scientific assumptions and workflow.
 
 This project is under active development; the API may evolve.
