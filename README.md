@@ -45,40 +45,19 @@ Make sure you keep the repository layout intact (cassini_upyp/ and user_config/ 
 
 ## Configuration (TOML)
 
-Before using the package, edit user_config/env.toml to point to your local resources.
+This repository ships with user-editable TOML configuration files stored in `user_config/`:
 
-1) user_config/env.toml
+- user_config/env.toml
+- user_config/plotting.toml
 
-This file contains local paths for resources that are not shipped with the code, typically:
+After downloading or cloning the repository, you must edit `user_config/env.toml` to point to the external resources available on your machine (SPICE kernels, calibration files, star catalogue).
+
+### user_config/env.toml
+
+This file defines local paths for resources that are not bundled with the code, typically:
 - UVIS calibration files directory
-- a star catalog file (stars.npy)
+- a star catalogue file (stars.npy)
 - SPICE kernels directory and specific kernel paths (IK, LSK)
-
-The code expects a [paths] section and will expose its entries directly as attributes for convenience.
-
-Minimal template (adapt to your machine):
-
-[paths]
-calibration_dir = "/path/to/calibration_files"
-star_file       = "/path/to/stars.npy"
-
-kernels_dir = "/path/to/spice_kernels"
-ik_path     = "/path/to/spice_kernels/ik/cas_uvis_v07.ti"
-lsk_path    = "/path/to/spice_kernels/lsk/naif0012.tls"
-
-Notes:
-- Absolute paths are recommended.
-- The package does not download SPICE kernels or calibration files for you.
-
-2) user_config/plotting.toml
-
-This file controls plotting parameters used by geometry/plotting helpers:
-- visible bodies in the field of view
-- offsets
-- grid definitions
-- line/marker styles per object
-
-If you do not use plotting helpers, you may not need to touch this file, but it is kept user-editable by design.
 
 ## Required external resources
 
