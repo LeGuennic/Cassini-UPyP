@@ -368,8 +368,6 @@ def is_vector_in_quadrilateral(v, quad):
     return results
 
 def is_visible(points, body_position, radii, threshold=1.e-6, starmode=False):
-    from .ellipsoid import intersect
-
 
     points =np.asarray(points)
     flag=False

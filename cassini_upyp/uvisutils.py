@@ -23,59 +23,28 @@ def poisson_error(
         sigma: float = 1.0
 ) -> float | np.ndarray:
     """
-    Compute Garwood confidence limits for a Poisson count.
-
-    This function returns *one* bound (lower or upper) of the central
-    two-sided confidence interval for an observed Poisson count `x`,
-    using the classical Garwood construction obtained by inverting
-    the chi-square CDF.
+    Return one Garwood bound (lower/upper) for Poisson counts.
 
     Parameters
     ----------
-    x : int or array-like of int
-        Observed Poisson count(s), must be >= 0.
-    bound : {'inf', 'sup'}
-        Which bound to return:
-        - 'inf' : lower confidence limit L.
-        - 'sup' : upper confidence limit U.
-        Aliases accepted: 'lower' -> 'inf', 'upper' -> 'sup'.
-        Input is case-insensitive and surrounding whitespace is ignored.
+    x : int or array-like
+        Observed counts (must be >= 0, finite).
+    bound : {"inf", "sup", "lower", "upper"}
+        Which bound to return. Aliases: "lower"->"inf", "upper"->"sup".
     sigma : float, optional
-        Number of Gaussian sigmas corresponding to the *central* confidence
-        level (two-sided). For example:
-        - sigma = 1.0  -> CL ≈ 68.27%
-        - sigma = 1.96 -> CL ≈ 95%
-        Default is 1.0.
+        Two-sided Gaussian-equivalent level for the central interval (default: 1.0).
 
     Returns
     -------
-    float or numpy.ndarray
-        The requested bound with the same shape as `x`. Returns a Python
-        float if `x` is scalar.
+    float or np.ndarray
+        Requested bound with the same shape as `x` (float if scalar input).
 
     Notes
     -----
-    Let CL be the central confidence level and alpha = 1 - CL, with
-    CL = Φ(sigma) - Φ(-sigma), where Φ is the standard normal CDF.
-    The Garwood limits are
-
-        L = 0.5 * chi2.ppf(alpha/2, 2*x)        for x > 0,   and L = 0 if x = 0
-        U = 0.5 * chi2.ppf(1 - alpha/2, 2*(x+1))
-
-    These intervals have (at least) the nominal coverage.
-
-    References
-    ----------
-    - F. Garwood (1936). "Fiducial Limits for the Poisson Distribution."
-      Biometrika, 28(3/4), 437–442.
-    - G. Casella & R. L. Berger (2002). *Statistical Inference*, 2nd ed.
-
-    Raises
-    ------
-    ValueError
-        If `bound` is invalid, if `x` contains negative, non-finite, or
-        non-integer-valued entries, or if `sigma` is not a finite,
-        non-negative float.
+    Uses the Garwood (chi-square) construction:
+      U = 0.5 * chi2.ppf(1 - alpha/2, 2*(x+1))
+      L = 0.5 * chi2.ppf(alpha/2,     2*x)   (with L=0 for x=0)
+    where alpha = 1 - (Phi(sigma) - Phi(-sigma)).
     """
     
     from scipy.stats import chi2, norm

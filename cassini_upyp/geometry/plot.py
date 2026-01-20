@@ -320,7 +320,7 @@ def plot(
 
 
         if show :
-            plt.show(block=False)
+            plt.show()
         if save :
             fig.tight_layout()
             if savename is None :

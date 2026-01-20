@@ -9,33 +9,27 @@ from typing import Literal, Sequence
 import numpy as np
 
 # DATA BINS UTILITIES -----
-def list_ndarray(bin_boundaries: Sequence[Sequence[float]]) -> np.ndarray:
+def list_ndarray(shape: tuple[int, ...]) -> np.ndarray:
     """
     Create a NumPy array (dtype=object) where each cell is initialized as an independant empty list.
 
-    The shape of the array is determined by the number of bins in each dimension,
-    i.e., (len(boundaries)-1, ...).
-
     Parameters
     ----------
-    bin_boundaries : sequence of sequences of float
-        Bin edges for each dimension. For example, two arrays of edges
-        will produce a 2D array of shape
-        (len(bin_boundaries[0]) - 1, len(bin_boundaries[1]) - 1).
+    shape : tuple of int
+        The shape of the array to create.
 
     Returns
     -------
     np.ndarray
-        A NumPy array of shape (len(bin_boundaries[0])-1, len(bin_boundaries[1])-1, ...)
-        where each cell is an empty Python list.
+        A NumPy array of the specified shape where each cell is an empty Python list.
 
     Examples
     --------
     Create a 2D array of lists for two properties:
 
     >>> from cassini_upyp.utils import list_ndarray
-    >>> bin_edges = ([0.0, 1.0, 2.0, 3.0], [10.0, 20.0, 30.0])
-    >>> bins = list_ndarray(bin_edges)
+    >>> shape = (3, 2)
+    >>> bins = list_ndarray(shape)
     >>> bins.shape
     (3, 2)
 
@@ -46,7 +40,6 @@ def list_ndarray(bin_boundaries: Sequence[Sequence[float]]) -> np.ndarray:
     [42.0]
     """
 
-    shape = tuple(len(bounds) - 1 for bounds in bin_boundaries)
     bins_array = np.empty(shape, dtype=object)
     
     # Initialize each cell with an empty list.
@@ -197,7 +190,7 @@ def env_config() -> SimpleNamespace:
     # Flatten [paths] section for backward-compatible attributes
     if hasattr(cfg, "paths") and isinstance(cfg.paths, dict):
         for k, v in cfg.paths.items():
-            setattr(cfg, k, v)
+            setattr(cfg, k, Path(v))
 
     return cfg
 

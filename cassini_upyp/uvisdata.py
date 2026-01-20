@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Literal
+from typing import Literal, Iterable
+from numpy.typing import ArrayLike
+from collections.abc import Sequence
 
 import sys
 from pathlib import Path
@@ -242,7 +244,7 @@ class Instrument(AttrDict):
         self.name = instrument_name
 
         # Load instrument kernel and resolve ID
-        spice.furnsh(env.ik_path)
+        spice.furnsh(str(env.ik_path))
         self.ID = spice.bodn2c(instrument_name)
         
         # Get FOV geometry in instrument frame
@@ -263,7 +265,7 @@ class Instrument(AttrDict):
         self.pixel_height = self.fov_height / self.n_pixels
         self.pixel_width  = self.fov_width
 
-        spice.unload(env.ik_path)
+        spice.unload(str(env.ik_path))
 
 
         # COMPUTE PIXEL CORNERS IN INSTRUMENT FRAME
@@ -435,13 +437,42 @@ class pds_raw_data:
 
 
 class UVIS_Bin:
-    def __init__(self, bin_attributes, bin_boundaries, uvis_obs):
-        self.bins = list_ndarray(bin_boundaries)
-        self.bin_def = {key:bin_boundary for key,bin_boundary in zip(bin_attributes, bin_boundaries)}
+    """
+    Container class holding the result of a pixel binning operation.
+
+    A ``UVIS_Bin`` instance stores:
+    - the list of detector pixels associated with each bin,
+    - the number of pixels per bin,
+    - optional bin definitions (geometric boundaries),
+    - mean geometric line-of-sight (LOS) properties per bin,
+    - references to the unbinned observational data.
+
+    The class is agnostic to how bins are constructed: bins may result from
+    automatic geometric binning or from explicit manual pixel grouping.
+    """
+
+
+    def __init__(self, shape: tuple[int, ...], uvis_obs: UVIS_Observation) -> None:
+        """
+        Initialize a bin container with a given bin grid shape.
+
+        Parameters
+        ----------
+        shape : tuple of int
+            Shape of the bin grid. Each element corresponds to the number of bins
+            along one binning dimension. For manual binning, this is typically
+            ``(n_bins,)``.
+
+        uvis_obs : UVIS_Observation
+            Parent observation object from which the unbinned data and geometry
+            are taken.
+        """
+
+        self.bins = list_ndarray(shape)
+        self.bin_def = None
 
         self.number_per_bin = np.zeros_like(self.bins, dtype=int)
 
-        self.HD = uvis_obs.HD
         self.pixel_LOS = np.copy(uvis_obs.pixel_LOS)
         self.bin_LOS   = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
 
@@ -453,41 +484,43 @@ class UVIS_Bin:
         self.WL = uvis_obs.WL
 
         self.slit_width = uvis_obs.slit_width
+        self.HD = uvis_obs.HD
 
         self.bin_averaged   = False
         self.bin_integrated = False
 
-
     def average_bins(self):
         """
-        Compute unweighted and weighted average spectra, along with associated uncertainties, for each bin.
-        For each bin in `self.bins` (a NumPy array of lists of (x, y) pixel indices), this method:
-          1. Computes the unweighted mean, standard deviation, and standard error of the spectra from `self.data[x, y, :]`.
-          2. Computes the weighted mean spectrum using the combined uncertainty (average of upper and lower uncertainties)
-             as weights, where the weight for each pixel is `1.0 / combined_unc^2`.
-          3. Propagates upper and lower uncertainties for the weighted mean using the formula:
-             `sqrt(1.0 / sum(1.0 / unc^2))` for both upper (`sup`) and lower (`inf`) uncertainties.
-        Output arrays are initialized to NaN and only filled for bins containing at least one (x, y) pair.
+        Compute per-bin mean spectra and uncertainties.
 
-        Parameters
-        ----------
-        None
+        For each bin (a list of pixel index pairs), this method computes:
+        - an unweighted mean spectrum, sample standard deviation (ddof=1),
+        and standard error of the mean (with small-sample correction),
+        - a weighted mean spectrum using 1/σ² weights, where σ is the
+        symmetric uncertainty (0.5*(sup+inf)),
+        - propagated upper and lower uncertainties for the weighted mean
+        using sqrt(1 / sum(1/σ²)) for each wavelength.
 
+        Empty bins are left as NaN. Results are stored as attributes and
+        ``self.bin_averaged`` is set to True.
+        
         Returns
         -------
         None
-            Results are stored as attributes:
-            - `self.bin_mean_spectrum`: Unweighted mean spectrum per bin.
-            - `self.bin_stddev_spectrum`: Unweighted standard deviation per bin.
-            - `self.bin_stderr_spectrum`: Unweighted standard error per bin (with small-sample correction).
-            - `self.bin_wmean_spectrum`: Weighted mean spectrum per bin.
-            - `self.bin_u_sup_spectrum`: Propagated upper uncertainty of weighted mean per bin.
-            - `self.bin_u_inf_spectrum`: Propagated lower uncertainty of weighted mean per bin.
-        - `self.bins.shape` is the shape of the bin grid (e.g., (d1, d2, ..., dn)).
-        - `self.WL.shape` is the shape of the spectral dimension (e.g., (nwl,)).
-        - All output arrays have shape `self.bins.shape + self.WL.shape`.
-        - If a bin is empty, the corresponding output entries remain NaN.
-        - Sets `self.bin_averaged = True` upon completion.
+        Results are stored as attributes:
+
+        - `bin_mean_spectrum` : ndarray
+            Unweighted mean spectrum per bin.
+        - `bin_stddev_spectrum` : ndarray
+            Unweighted standard deviation per bin.
+        - `bin_stderr_spectrum` : ndarray
+            Unweighted standard error per bin (with small-sample correction).
+        - `bin_wmean_spectrum` : ndarray
+            Weighted mean spectrum per bin.
+        - `bin_u_sup_spectrum` : ndarray
+            Propagated upper uncertainty of weighted mean per bin.
+        - `bin_u_inf_spectrum` : ndarray
+            Propagated lower uncertainty of weighted mean per bin.
         """
 
         bin_shape = self.bins.shape
@@ -502,8 +535,7 @@ class UVIS_Bin:
 
         for idx in np.ndindex(bin_shape):
             pairs = self.bins[idx]
-            if not pairs:  # Empty bin
-                continue
+            if not pairs: continue # Empty bin
 
             # 1) Gather data and uncertainties for all pixels in the bin
             stacked_data = np.array([self.data[i, j, :]            for (i, j) in pairs])            
@@ -515,16 +547,13 @@ class UVIS_Bin:
             
             self.bin_mean_spectrum[idx]   = stacked_data.mean(axis=0)
             if N>1 :
-                self.bin_stddev_spectrum[idx] = stacked_data.std (axis=0, ddof=1)
+                self.bin_stddev_spectrum[idx] = stacked_data.std(axis=0, ddof=1)
 
                 correction = correction_factor(N)
                 self.bin_stderr_spectrum[idx] = correction * self.bin_stddev_spectrum[idx] / np.sqrt(N)
             else :
                 self.bin_stddev_spectrum[idx] = np.zeros_like(self.WL)
-                self.bin_stderr_spectrum[idx] = np.full_like(self.WL, fill_value=np.nan, dtype=float)
-
-
-
+                self.bin_stderr_spectrum[idx] = np.zeros_like(self.WL)
 
             # 3) Weighted mean using combined uncertainty = (sup + inf)/2
             combined_unc = 0.5 * (stacked_sup + stacked_inf)
@@ -534,8 +563,11 @@ class UVIS_Bin:
             w_data_sum   = (stacked_data * weights).sum(axis=0)
 
             # Weighted mean (avoid division by zero where w_sum==0)
-            self.bin_wmean_spectrum[idx] = np.divide(w_data_sum, w_sum,
-                                                  out=np.full(self.WL.shape, np.nan), where=(w_sum>0))
+            self.bin_wmean_spectrum[idx] = np.divide(
+                w_data_sum, w_sum,
+                out=np.full(self.WL.shape, np.nan),
+                where=(w_sum>0)
+            )
 
             # 4) Propagate separate upper/lower uncertainties
             inv_sup_sq = 1.0 / np.square(stacked_sup)
@@ -556,12 +588,71 @@ class UVIS_Bin:
             
         self.bin_averaged = True
 
-    def integrate(self, wl_range=(1600,1900), uncertainty=True, method='simpson'):
-        
+    def integrate(self, wl_range: tuple[float, float] = (1600,1900), uncertainty: bool = True, method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') -> None:
+        """
+        Integrate spectra over a wavelength band and compute per-bin integrated products.
+
+        This method performs three integration tasks:
+        1. Integrates the raw pixel-level spectra and uncertainties.
+        2. Averages these integrated values within each bin.
+        3. If bins have already been averaged (via `average_bins`), also integrates
+           the bin-averaged spectra.
+
+        Parameters
+        ----------
+        wl_range : (float, float), optional
+            Integration bounds (min_wl, max_wl). Default is (1600, 1900).
+        uncertainty : bool, optional
+            If True (default), uncertainty arrays are integrated in quadrature
+            under the integral (see ``integrate_spectrum``).
+        method : {"simpson", "trapezoid", "trapz"}, optional
+            Numerical integration method passed to ``integrate_spectrum``.
+            Default is "simpson".
+
+        Returns
+        -------
+        None
+        Results are stored as attributes:
+
+        Pixel-level integrated data:
+        - `integrated_data` : ndarray
+            Integrated spectrum for each pixel.
+        - `integrated_uncertainty_sup` : ndarray
+            Integrated upper uncertainty for each pixel.
+        - `integrated_uncertainty_inf` : ndarray
+            Integrated lower uncertainty for each pixel.
+
+        Binned integrated data:
+        - `binned_integrated_data` : ndarray
+            Mean of integrated pixel values per bin.
+        - `binned_integrated_uncertainty_sup` : ndarray
+            Propagated upper uncertainty per bin.
+        - `binned_integrated_uncertainty_inf` : ndarray
+            Propagated lower uncertainty per bin.
+        - `bin_stddev` : ndarray
+            Standard deviation of integrated values per bin.
+        - `bin_stderr` : ndarray
+            Standard error of integrated values per bin.
+
+        If `self.bin_averaged` is True, also creates:
+        - `integrated_avrg_data` : ndarray
+            Integration of unweighted bin-averaged spectra.
+        - `integrated_avrg_data_w` : ndarray
+            Integration of weighted bin-averaged spectra.
+        - `integrated_avrg_stddev` : ndarray
+            Integration of bin standard deviation spectra.
+        - `integrated_avrg_stderr` : ndarray
+            Integration of bin standard error spectra.
+        - `integrated_avrg_uncertainty_sup` : ndarray
+            Integration of bin upper uncertainty spectra.
+        - `integrated_avrg_uncertainty_inf` : ndarray
+            Integration of bin lower uncertainty spectra.
+        """
+
         # Integrate spectra
-        self.integrated_data = integrate_spectrum(self.WL, self.data, wl_range=wl_range, axis=-1)
-        self.integrated_uncertainty_inf = integrate_spectrum(self.WL, self.uncertainty_inf, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
-        self.integrated_uncertainty_sup = integrate_spectrum(self.WL, self.uncertainty_sup, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
+        self.integrated_data            = integrate_spectrum(self.WL, self.data,            method=method, wl_range=wl_range, axis=-1)
+        self.integrated_uncertainty_inf = integrate_spectrum(self.WL, self.uncertainty_inf, method=method, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
+        self.integrated_uncertainty_sup = integrate_spectrum(self.WL, self.uncertainty_sup, method=method, wl_range=wl_range, axis=-1, uncertainty=uncertainty)
 
 
         # Average integrated arrays
@@ -574,7 +665,7 @@ class UVIS_Bin:
         for idx in np.ndindex(self.bins.shape):
             
             pairs = self.bins[idx]
-            if not pairs:  continue
+            if not pairs: continue
 
             N = len(pairs)
 
@@ -588,7 +679,7 @@ class UVIS_Bin:
 
             else:
                 self.bin_stddev[idx]             = 0
-                self.bin_stderr[idx]             = np.nan
+                self.bin_stderr[idx]             = 0
 
             self.binned_integrated_uncertainty_sup[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_sup[i, j]**2 for (i, j) in pairs]))
             self.binned_integrated_uncertainty_inf[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_inf[i, j]**2 for (i, j) in pairs]))
@@ -598,18 +689,41 @@ class UVIS_Bin:
 
         # Integrate the already bin-averaged spectra
         if self.bin_averaged:
-            self.integrated_avrg_data            = integrate_spectrum(self.WL, self.bin_mean_spectrum,  wl_range=wl_range, axis=-1, method=method)
-            self.integrated_avrg_data_w          = integrate_spectrum(self.WL, self.bin_wmean_spectrum, wl_range=wl_range, axis=-1, method=method)
+            self.integrated_avrg_data            = integrate_spectrum(self.WL, self.bin_mean_spectrum,   wl_range=wl_range, axis=-1, method=method)
+            self.integrated_avrg_data_w          = integrate_spectrum(self.WL, self.bin_wmean_spectrum,  wl_range=wl_range, axis=-1, method=method)
 
-            self.integrated_avrg_stddev          = integrate_spectrum(self.WL, self.bin_stddev_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
-            self.integrated_avrg_stderr          = integrate_spectrum(self.WL, self.bin_stderr_spectrum, wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
-            self.integrated_avrg_uncertainty_sup = integrate_spectrum(self.WL, self.bin_u_sup_spectrum,  wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
-            self.integrated_avrg_uncertainty_inf = integrate_spectrum(self.WL, self.bin_u_inf_spectrum,  wl_range=wl_range, axis=-1, uncertainty=uncertainty, method=method)
+            self.integrated_avrg_stddev          = integrate_spectrum(self.WL, self.bin_stddev_spectrum, wl_range=wl_range, axis=-1, method=method, uncertainty=uncertainty)
+            self.integrated_avrg_stderr          = integrate_spectrum(self.WL, self.bin_stderr_spectrum, wl_range=wl_range, axis=-1, method=method, uncertainty=uncertainty)
+            self.integrated_avrg_uncertainty_sup = integrate_spectrum(self.WL, self.bin_u_sup_spectrum,  wl_range=wl_range, axis=-1, method=method, uncertainty=uncertainty)
+            self.integrated_avrg_uncertainty_inf = integrate_spectrum(self.WL, self.bin_u_inf_spectrum,  wl_range=wl_range, axis=-1, method=method, uncertainty=uncertainty)
 
+    def plot_bin(self, show: bool = True):
+        """
+        Display a table visualization of the number of pixels per bin.
 
-    def plot_bin(self):
+        Creates a matplotlib table showing bin centers as row/column labels
+        and the count of pixels in each bin as cell values. Empty bins are
+        displayed as blank cells.
+
+        Parameters
+        ----------
+        show : bool, optional
+            If True (default), call ``plt.show()``. If False, the figure is
+            returned for further customization/saving.
+        fmt : str, optional
+            Format string used for the bin-center labels (default: ".0f").
+
+        Notes
+        -----
+        - Only works for 2D bin grids.
+        - Bin centers are computed as midpoints of bin edges.
+        """
+            
         import matplotlib.pyplot as plt
 
+        if self.bins.ndim != 2:
+            raise ValueError("plot_bin() only supports 2D bin grids.")
+        
         number_per_bin = np.where(self.number_per_bin == 0, "", self.number_per_bin.astype(str))
         number_per_bin = number_per_bin.T
         number_per_bin = np.flip(number_per_bin, axis=0)
@@ -621,25 +735,30 @@ class UVIS_Bin:
         row_labels = [str((row_val[i+1]+row_val[i])/2) for i in range(self.bins.shape[1])][::-1]
 
         fig, ax = plt.subplots()
-        ax.set_axis_off()  # On masque les axes
+        ax.set_axis_off()
 
 
-        # Création du tableau au centre
         table = ax.table(
             cellText=number_per_bin,
             loc='center',
-            cellLoc='center',  # Aligne le texte dans chaque cellule au centre
+            cellLoc='center',
             colLabels=col_labels,
             rowLabels=row_labels
         )
 
-        # Ajustement automatique de la figure
         plt.tight_layout()
-        plt.show()
-
-
+        if show: plt.show()
+        return fig, ax
 
     def __repr__(self):
+        """
+        Return a string representation of the UVIS_Bin object.
+
+        Returns
+        -------
+        str
+            Summary of bin configuration and state.
+        """
         info = f"<UVIS_bin object>\n"
         info += f"  Observation: {self.name}\n"
         info += f"  Bin shape  : {self.bins.shape}\n"
@@ -649,7 +768,35 @@ class UVIS_Bin:
         info += f"  Bin averaged? {'Yes' if hasattr(self, 'bin_mean_data') else 'No'}"
         return info
     
-    def save(self, filepath: str | Path, overwrite: bool = False):
+    def save(self, filepath: str | Path, overwrite: bool = False) -> str:
+        """
+        Save the UVIS observation data to a binary file.
+        This method serializes the current UVIS observation object to a binary file.
+        The file extension is automatically set to '.uvisbin' if not provided.
+
+        Parameters
+        ----------
+            filepath: (str | Path)
+                The path where the file should be saved. If the path doesn't 
+                have a '.uvisbin' extension, it will be automatically added.
+            overwrite:(bool, optional)
+                If True, existing files will be overwritten without 
+                prompting. If False (default), the user will be prompted for confirmation 
+                before overwriting existing files.
+        
+        Returns
+        -------
+            str
+                The original filepath parameter that was passed to the method.
+
+        Notes
+        -----
+            - The method uses pickle for serialization, so the saved file will be in binary format
+            - If the file already exists and overwrite=False, the user will be prompted to confirm
+            - The method prints status messages during the save operation
+            - If the user chooses not to overwrite an existing file, the save operation is cancelled
+        """
+
 
         p = Path(filepath)
         if p.suffix.lower() != '.uvisbin':
@@ -658,7 +805,7 @@ class UVIS_Bin:
         print(f"Saving UVIS observation bin object {p.stem}...", end='', flush=True)
 
         if p.exists() and not overwrite:
-            response = input(f"File '{p.absolute()}' already exists. Overwrite? [y/N]: ").strip().lower()
+            response = input(f"\nFile '{p.absolute()}' already exists. Overwrite? [y/N]: ").strip().lower()
             if response not in ('y', 'yes', 'o', '1', 'oui'):
                 print("Save cancelled.")
                 return
@@ -670,68 +817,108 @@ class UVIS_Bin:
 
         return filepath
     
-
     @classmethod
-    def load(cls, filepath):
+    def load(cls, filepath: str | Path) -> UVIS_Bin:
+        """
+        Load a UVIS_Bin object from a pickle file.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Path to the pickle file containing the serialized UVIS_Bin object.
+
+        Returns
+        -------
+        UVIS_Bin
+            The deserialized UVIS_Bin object loaded from the file.
+            
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        PickleError
+            If the file cannot be unpickled or is corrupted.
+        """
+
         with open(filepath, 'rb') as f:
             return pickle.load(f)
 
 class UVIS_Observation:
     """
-    Class representing a UVIS observation from the Cassini spacecraft.
+    Cassini/UVIS observation built from one or several PDS3 products.
 
-    This class aggregates and processes raw PDS (Planetary Data System) data from the Cassini UVIS instrument.
-    It handles reading, calibration, background correction, geometry computation, and star contamination identification.
+    This class loads UVIS PDS .DAT/.LBL files, concatenates frames, and provides
+    helpers for calibration, background estimation, geometry (SPICE-based),
+    star/corruption masking, and pixel binning.
     """
 
-    def __init__(self, *args, batch:str=None, prime_instrument='PRIME', ID=0, target='Titan', name=None):
+    def __init__(
+            self,
+            *files: str | Path | Iterable[str | Path],
+            batch: str | Path | None = None,
+            prime_instrument: Literal["PRIME", "UVIS", "CIRS", "VIMS", "ISS"] = 'PRIME',
+            ID: int = 0,
+            target: str = 'Titan',
+            name: str | None = None,
+            sort: bool = True,
+    ):
         """
-        Initialize a UVIS_Observation object from PDS files.
+        Build an observation from UVIS PDS files.
 
         Parameters
         ----------
-        *args : list
-            List of file paths (without extensions) or an iterable of such paths.
-        batch : str, optional
-            Path to a batch file listing the base names of the PDS files.
-        prime_instrument : str, optional
-            Identifier for the primary instrument 'CIRS', 'VIMS' or 'ISS. Defaults to 'PRIME'.
+        *files : str | Path | iterable
+            One or more base paths (with or without extension).
+        batch : str | Path, optional
+            Text file listing base paths (one per line). If provided, it overrides *files.
+        prime_instrument : {"PRIME","UVIS","CIRS","VIMS","ISS"}, optional
+            Prime instrument tag used in naming/metadata.
         ID : int, optional
-            Identifier for multiple observations within one day. Defaults to 0.
+            Extra identifier appended to the observation name when > 0.
         target : str, optional
-            Observation target name. Defaults to 'Titan'.
+            Target name (stored uppercased).
         name : str, optional
-            Custom observation name. If None, a default name is generated.
-
+            If provided, overrides the auto-generated name.
+        sort : bool, optional
+            If True (default), sort files and exposures by spacecraft clock start time.
         Notes
         -----
-        This initializer reads the raw PDS files, concatenates the counts,
-        and initializes metadata including exposure times, calibration arrays,
-        geometry information, and instrument details.
+        - This initializer reads all PDS products into `self.pds_data`, concatenates
+        `raw_data` along the time axis, and builds per-exposure time arrays (ET/UTC).
+        - Geometry is not computed here; call `set_geometry()`.
         """
         
-
         # READING DATA
         #________________________
         if batch is not None :
             batch_path = Path(batch)
             batch_dir  = batch_path.parent
             with batch_path.open('r') as f :
-                args = [line.strip() for line in f if line.strip()]
+                files = [line.strip() for line in f if line.strip()]
 
             # For each line, if the path is relative, join with batch_dir and remove extension.
-            args = [str((batch_dir / line).with_suffix('')) if not Path(line).is_absolute() else str(Path(line).with_suffix('')) for line in args]
-            self.pds_data  = [pds_raw_data(f)    for f in args]
-            self.raw_files = [  str(f)           for f in args]
+            files = [str((batch_dir / line).with_suffix('')) if not Path(line).is_absolute() else str(Path(line).with_suffix('')) for line in files]
 
         else :
             # Read batch of PDS files
-            if len(args) == 1 and hasattr(args[0], '__iter__') and not isinstance(args[0], (str, bytes)):
-                args = args[0]
-            
-            self.pds_data  = [pds_raw_data(f)    for f in args] # Generate pds_raw_data structure for each file in the batch
-            self.raw_files = [  str(f)           for f in args]
-            #________________________
+            if len(files) == 1 and hasattr(files[0], '__iter__') and not isinstance(files[0], (str, bytes)):
+                files = files[0]
+
+            files = [str(Path(f).with_suffix('')) for f in files]
+            files = list(dict.fromkeys(files))
+
+        if sort :
+            # Sort files by spacecraft clock start time
+            files_with_sctime = []
+            for f in files :
+                pds = pds_raw_data(f)
+                sctime = float(pds.label.SPACECRAFT_CLOCK_START_COUNT.split('/')[-1])
+                files_with_sctime.append( (f, sctime) )
+            files_with_sctime.sort(key=lambda x: x[1])
+            files = [f[0] for f in files_with_sctime]
+        self.pds_data  = [pds_raw_data(f)    for f in files] # Generate pds_raw_data structure for each file in the batch
+        self.raw_files = [  str(f)           for f in files]
+        #________________________
 
 
 
@@ -857,7 +1044,7 @@ class UVIS_Observation:
         # TIMES
         #______________________________
 
-        spice.furnsh(env.lsk_path)
+        spice.furnsh(str(env.lsk_path))
 
         # Spacecraft clock start for each LBL file
         self.sctime_sec_start = np.array( [float(e.label.SPACECRAFT_CLOCK_START_COUNT.split('/')[-1]) for e in self.pds_data] )-self.expo_time
@@ -882,14 +1069,14 @@ class UVIS_Observation:
         self.UTC_stop   = [spice.et2utc(et, "ISOD", 3) for et in self.ET_stop  ]
 
         del samples, pds_ET_start
-        spice.unload(env.lsk_path)
+        spice.unload(str(env.lsk_path))
 
         # Sub-exposure times
         self.times_exposition = np.array([np.linspace(self.ET_start[i], self.ET_stop[i], PicsPerExposure, endpoint=True) for i in range(self.n_pics)])
 
         self.__dict__['_init_done'] = True
 
-    def integrate_radiance(self, wl_range=(1600,1900), method='simpson') :
+    def integrate_radiance(self, wl_range: tuple[float, float] = (1600,1900), method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') :
         """
         Integrate the calibrated radiance over a specified wavelength range.
 
@@ -903,7 +1090,7 @@ class UVIS_Observation:
         Returns
         -------
         numpy.ndarray
-            Integrated radiance values for each exposure.
+            Integrated radiance values per exposure and spatial pixel.
         """
 
 
@@ -916,18 +1103,30 @@ class UVIS_Observation:
         # Integrate spectrum
         return integrate_spectrum(self.WL, signal, wl_range=wl_range, axis=2, method=method)
     
-    def get_radiance_uncertainty(self) :
+    def get_radiance_uncertainty(self) -> tuple[np.ndarray, np.ndarray]:
         """
-        Compute the uncertainty of the calibrated radiance. Uncertainty interval
-        is base on the Scores confidence interval (Barker, 2008).
+        Compute per-pixel radiance uncertainties (upper/lower).
+
+        Uses Garwood Poisson bounds on detector counts, then propagates
+        count and calibration uncertainties to radiance. If a background level is set,
+        adds its contribution in quadrature.
 
         Returns
         -------
-        tuple of numpy.ndarray
-            Tuple containing (uncertainty_sup, uncertainty_inf) arrays.
+        tuple[np.ndarray, np.ndarray]
+            (uncertainty_sup, uncertainty_inf), same shape as `self.counts`.
+
+        Raises
+        ------
+        RuntimeError
+            If calibration has not been set prior to calling this method.
         """
 
-        counts_position = self.cps>0
+        if not self.calibration_set:
+            raise RuntimeError("Calibration must be set before computing radiance uncertainty (run set_calibration()).")
+
+
+        counts_position = self.counts>0
 
         if self.background_level == 0:
             bg_radiance_err = 0
@@ -967,14 +1166,22 @@ class UVIS_Observation:
 
         return uncertainty_sup, uncertainty_inf
 
-    def smooth(self, force=False):
+    def smooth(self, force: bool = False, smoothing_kernel: ArrayLike = smoothing_kernel) -> None:
         """
-        Smooth the calibrated data and uncertainties using 1D convolution.
+        Smooth the calibrated FUV data and uncertainties using 1D convolution.
+
+        Parameters
+        ----------
+        force : bool, optional
+            If True, forces smoothing even if data is already smoothed. Default is False.
+        smoothing_kernel : array-like, optional
+            1D array defining the smoothing kernel.
 
         Notes
         -----
         Smoothing is applied only on valid (non-NaN) data points.
         """
+
         if self.channel!='FUV' :
             print('Smoothing is only available for FUV channel')
             return
@@ -991,33 +1198,32 @@ class UVIS_Observation:
 
 
     # -------- CALIBRATION
-    def get_calibration(self, sctime, interp='pchip', flat_field=True) :
+    def get_calibration(self, sctime: float, interp: Literal['linear', 'pchip'] = 'pchip', flat_field: bool = True) -> dict[str, np.ndarray]:
         """
         Retrieve the calibration multiplier (inverse sensitivity) of the Cassini UVIS instrument.
 
-        This method calculates the calibration factors for the raw data based on several parameters,
-        including the UVIS channel (EUV or FUV), slit width, data type, window boundaries, binning,
-        and the time of observation.
-
         Parameters
         ----------
-        interp : str, optional
-            The interpolation method used to map the lab calibration to the full detector range.
+        sctime : float
+            Spacecraft time of the observation, used to apply time-dependent calibration
+            modifiers and to select the appropriate flat-field epoch.
+        interp : {'linear', 'pchip'}, optional
+            Interpolation method used to map the lab calibration to the full detector range.
             Options are:
             - 'linear' : Linear interpolation.
             - 'pchip'  : Piecewise Cubic Hermite Interpolating Polynomial.
             Default is 'linear'.
-
         flat_field : bool, optional
-            Whether to apply the flat-field correction to the raw data.
+            If True, apply flat-field correction (including its time variation). If False,
+            the flat-field is effectively disabled.
             Default is `True`.
 
         Returns
         -------
-        dict
+        dict[str, np.ndarray]
             A dictionary containing:
             - 'calibration'       : numpy.ndarray
-                The calibration factor, binned and reshaped to match the raw data dimensions.
+                The calibration multiplier, binned and shaped to match the raw data dimensions.
             - 'calibration_error' : numpy.ndarray
                 The calibration error array.
 
@@ -1030,18 +1236,6 @@ class UVIS_Observation:
             - Binning is performed according to the spatial and spectral binning factors.
         - For the FUV channel, pixels known as 'evil' pixels with anomalous behavior are handled,
           and corresponding elements in the arrays are set to NaN.
-
-        Examples
-        --------
-        Compute the calibration factors with linear interpolation and flat-field correction:
-
-        >>> calibration = data_pds.get_calibration()
-        >>> cal_factor  = calibration['calibration']
-        >>> cal_error   = calibration['calibration_error']
-
-        Compute the calibration factors without flat-field correction:
-
-        >>> calibration = data_pds.get_calibration(flat_field=False)
         """
 
         # -- LABORATORY CALIBRATION
@@ -1183,21 +1377,22 @@ class UVIS_Observation:
             self.calibration_error[i] = cal['calibration_error']
         self.calibration_set = True
 
-    def calibrate(self, wl_interp='pchip', nan_interp='linear', flat_field=True, smooth=True, extrapolate=False) :
+    def calibrate(self, wl_interp: Literal["pchip","linear"] = 'pchip', nan_interp: Literal["linear","pchip"] = 'linear', flat_field: bool = True, smooth: bool = True) :
         """
-        Calibrate the raw data to obtain radiance and sets class attributes.
+        Calibrate counts/s to radiance and populate `data` and uncertainty arrays.
 
         Parameters
         ----------
-        interp : {'pchip', 'linear'}, optional
-            Interpolation method for processing the data. Default is 'pchip'.
-        flat_field : bool, optional
-            Whether to apply flat-field corrections. Default is True.
-        smooth : bool, optional
-            Whether to smooth the calibrated data. Default is True.
-        extrapolate : bool, optional
-            Whether to perform extrapolation during interpolation. Default is False.
+        wl_interp : {"pchip","linear"}
+            Interpolation used when building calibration sensitivity vs wavelength.
+        nan_interp : {"linear","pchip"}
+            Interpolation used to fill NaNs in calibrated spectra.
+        flat_field : bool
+            Apply flat-field and its time-dependent modifier.
+        smooth : bool
+            Apply spectral smoothing.
         """
+
         print('Applying calibration...', end='')
         
         if not self.calibration_set : self.set_calibration(flat_field=flat_field, interp=wl_interp)
@@ -1219,28 +1414,27 @@ class UVIS_Observation:
 
 
     # -------- GEOMETRY
-    def get_geometry(self, ET:float, **kwargs) :
+    def get_geometry(self, ET:float, **kwargs) -> 'Geometry':
         """
         Compute the geometry for a given ephemeris time.
 
         Parameters
         ----------
-        ET : float
+        ET: float
             Ephemeris time for which to compute the geometry.
         **kwargs
-            Additional keyword arguments for the geometry class.
+            Additional keyword arguments for the Geometry class.
 
         Returns
         -------
-        geometry
-            A geometry object computed for the given time.
+        Geometry
+            A Geometry object computed for the given time.
         """
-        
         from .geometry import Geometry
 
         return Geometry( ET, u=self, **kwargs)
 
-    def set_geometry(self, et_range=None, **kwargs) :
+    def set_geometry(self, et_range: ArrayLike = None, **kwargs) :
         """
         Compute and set geometry for a range of exposures.
 
@@ -1256,7 +1450,6 @@ class UVIS_Observation:
         This method updates the geometry attribute and computes the mean heliocentric distance (HD)
         and line-of-sight pixel data.
         """
-
         
         self.geometry = []
         if et_range is None : et_range = self.ET_middle
@@ -1295,7 +1488,7 @@ class UVIS_Observation:
             self.pixel_star_geometry, dtype=dtype
             ).reshape(self.n_pics, n_pixels)
         
-    def plot_all_geometry(self, folder, out_format='png', duration=1/60):
+    def plot_all_geometry(self, folder: str | Path, out_format: Literal["png","gif"] = 'png', duration: float = 1/60):
         """
         Plot geometry for all exposures and save the results.
 
@@ -1308,6 +1501,7 @@ class UVIS_Observation:
         duration : float, optional
             Duration per frame for GIF animation (in seconds). Default is 1/60.
         """
+
         import matplotlib.pyplot as plt
         from PIL import Image
 
@@ -1329,11 +1523,6 @@ class UVIS_Observation:
                 frames.append(im)
                 buf.close()
 
-
-                # frame = imageio.imread(buf)
-                # frames.append(frame)
-                # buf.close()
-
             gif_filename = folder / f"{self.name}.gif"
 
             frames[0].save(
@@ -1344,7 +1533,6 @@ class UVIS_Observation:
             duration=duration,
             disposal=2           # important for transparency
             )
-            # imageio.mimsave(str(gif_filename), frames, duration=duration, loop=0)
             print(f"GIF created : {gif_filename}")
         else :
             # Standard case: save each plot as an individual file
@@ -1356,7 +1544,7 @@ class UVIS_Observation:
 
 
     # -------- STARS IDENTIFICATION
-    def add_pixel_stars_from_file(self, file:str|Path):
+    def add_pixel_stars_from_file(self, file: str | Path):
         """
         Add star contamination data from a file.
 
@@ -1380,24 +1568,31 @@ class UVIS_Observation:
                 self.pixel_stars.append((int(i), int(j)))
                 self.pixel_stars_mask[int(j), int(i)] = True
 
-    
-    def plot_radiance_evolution(self, output_path=None, ylim=(0.01,20), yscale='log', wl_range=(1600,1900), method='trapezoid') :
+    def plot_radiance_evolution(
+            self,
+            output_path: str | Path = None,
+            ylim: tuple[float, float] = (0.01,20),
+            yscale: Literal['log', 'linear'] = 'log',
+            wl_range: tuple[float, float] = (1600,1900),
+            method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid'
+        ):
         """
         Plot the evolution of integrated radiance for each pixel over exposures.
 
         Parameters
         ----------
-        output_path : str, optional
+        output_path : str | Path, optional
             File path to save the PDF containing the plots. Default is 'signal_time_variation.pdf'.
-        ylim : tuple of float, optional
+        ylim : tuple[float, float], optional
             Y-axis limits for the plots. Default is (0.01, 20).
         yscale : str, optional
             Scale for the y-axis ('log' or 'linear'). Default is 'log'.
-        wl_range : tuple of float, optional
+        wl_range : tuple[float, float], optional
             Wavelength range for integration. Default is (1600, 1900).
         method : {'simpson', 'trapz'}, optional
             Integration method to use. Default is 'simpson'.
         """
+
         import matplotlib.pyplot as plt
         from matplotlib.backends.backend_pdf import PdfPages
         integrated_radiance = self.integrate_radiance(wl_range=wl_range, method=method)
@@ -1450,7 +1645,13 @@ class UVIS_Observation:
                 plt.close(fig)
 
 
-    def check_stars(self,  cmap='gist_ncar', color_scale=(0,14), wl_range=(1600,1900), method='trapezoid'):
+    def check_stars(
+            self,
+            cmap: str = 'gist_ncar',
+            color_scale: tuple[float, float] = (0,14),
+            wl_range: tuple[float, float]    = (1600,1900),
+            method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid'
+        ):
         """
         Create a heatmap of integrated radiance and highlight pixels affected by stars.
         The heatmap is interactive for the user to identify pixels as contaminated by a star.
@@ -1463,7 +1664,7 @@ class UVIS_Observation:
             Color scale limits. Default is (0, 14).
         wl_range : tuple of float, optional
             Wavelength range for integration. Default is (1600, 1900) in angströms.
-        method : {'simpson', 'trapezoid'}, optional
+        method : {'simpson', 'trapz', 'trapezoid'}, optional
             Integration method to use. Default is 'simpson'.
 
         Notes
@@ -1497,12 +1698,18 @@ class UVIS_Observation:
         cbar.set_label("Integrated radiance (kR)", rotation=270, labelpad=15)
 
         # Ticks definition
-        xticks = np.arange(self.n_pics)
+        if self.n_pics < 10 :
+            xticks = np.arange(self.n_pics)
+        else :
+            xticks = np.arange(self.n_pics, step=2)
+        
         yticks = np.arange(self.n_pixels)
 
         ax.set_xticks(xticks)
         ax.set_yticks(yticks)
         ax.set_aspect('equal')
+        ax.set_xlabel("Exposure Number")
+        ax.set_ylabel("Pixel Number")
         ax.set_zorder(2)
         cax.set_zorder(1)
 
@@ -1510,15 +1717,10 @@ class UVIS_Observation:
         # ADD GEOMETRY INFO
         if self.geometry is not None :
             
-            if np.any(self.pixel_star_geometry[:]['on_disk']) :
-                index = np.where(self.pixel_star_geometry[:]['on_disk'])
-                result = list(zip(index[0], index[1]))
-
-                for xuv,yuv in result :
-
-                    rect = Rectangle((xuv - 0.5, yuv - 0.5), 1, 1, 
-                    edgecolor='green', linewidth=1, facecolor='none')
-                    ax.add_patch(rect)
+            # DISK
+            mask_ij = np.all(self.pixel_LOS['alt'] < 0, axis=2)
+            for xuv, yuv in np.argwhere(mask_ij):
+                ax.plot([xuv], [yuv], color="#000000", ls='', marker='o', markersize=4)
             
             if np.any(self.pixel_star_geometry[:]['number']>0) :
                 index  = np.where((self.pixel_star_geometry[:]['number']>0)*(~self.pixel_star_geometry[:]['is_UV']))
@@ -1529,18 +1731,6 @@ class UVIS_Observation:
                     rect = Rectangle((xuv - 0.5, yuv - 0.5), 1, 1, 
                      edgecolor='yellow', linewidth=1, facecolor='none')
                     ax.add_patch(rect)
-
-
-                if np.any(self.pixel_star_geometry[:]['is_UV']) :
-                    index_uv = np.where(self.pixel_star_geometry[:]['is_UV'])
-                    result = list(zip(index_uv[0], index_uv[1]))
-
-                    for xuv,yuv in result :
-
-                        rect = Rectangle((xuv - 0.5, yuv - 0.5), 1, 1, 
-                        edgecolor='purple', linewidth=1, facecolor='none')
-                        ax.add_patch(rect)
-
         
         # INTERACTION HANDLES
         for (row, col) in self.pixel_stars:
@@ -1549,12 +1739,7 @@ class UVIS_Observation:
             line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
             self.markers[(row, col)] = line
         text_handle = ax_text.text(0, 1, "Selected pixels:\n", va='top', fontsize=10,family='monospace')
-        # if self.markers :
-        #     for (row, col) in self.markers:
-        #         x_center = (X[col] + X[col+1]) / 2
-        #         y_center = (Y[row] + Y[row+1]) / 2
-        #         line, = ax.plot(x_center, y_center, 'x', color='red', markersize=8, mew=2)
-        #         self.markers[(row, col)] = line
+
 
 
         def update_text():
@@ -1635,12 +1820,9 @@ class UVIS_Observation:
                             f"Signal     : {pixel_value:.2f} kR\n"
                             f"Altitude   : {alt_center:.0f} km ({alt_min:.0f} km <-> {alt_max:.0f} km)\n"
                             f"Local time : {self.pixel_LOS[col,row,0]['lt']:.1f}\n"
-                            f"SZA        : {self.pixel_LOS[col,row,0]['sza']:.1f}°"
+                            f"SZA        : {self.pixel_LOS[col,row,0]['sza']:.1f}°\n"
+                            f"Latitude   : {self.pixel_LOS[col,row,0]['lat']:.1f}°\n"
                         )
-                    
-
-                    # On peut aussi incorporer d'autres infos (e.g. magnitude, etc.)
-                    # si on a accès à self.geometry ou un tableau de métadonnées.
 
                     # Mise à jour de l’annotation
                     hover_annotation.xy = (col, row)
@@ -1665,7 +1847,14 @@ class UVIS_Observation:
         
 
     # -------- BACKGROUND NOISE
-    def get_background(self, mode:Literal['average', 'simulate']='simulate', alt_limit=2000, wl_range=(1600,1900), n_fits=20, parallel=True):
+    def get_background(
+            self,
+            mode: Literal['average', 'simulate'] = 'simulate',
+            alt_limit: float = 2000,
+            wl_range: tuple[float, float] = (1600,1900),
+            n_fits: int = 20,
+            parallel: bool = True
+        ) -> tuple[float, float]:
         """
         Compute the background noise level and its uncertainty from the raw detector counts.
 
@@ -1685,7 +1874,7 @@ class UVIS_Observation:
         n_fits : int, optional
             Number of fits to perform in simulation mode. Default is 20.
         parallel : bool, optional
-            Whether to perform the simulation in parallel. Default is True.
+            Whether to perform the simulation in parallel processing. Default is True.
 
         Returns
         -------
@@ -1837,7 +2026,31 @@ class UVIS_Observation:
         return cps, cps_err
 
 
-    def set_background(self, bg=None, bg_uncertainty=None, **kwargs) :
+    def set_background(self, bg: float = None, bg_uncertainty: float = None, **kwargs) :
+        """
+        Set (or estimate) the detector background level and update background-corrected CPS.
+
+        If `bg` and `bg_uncertainty` are not provided, estimates them with `get_background(**kwargs)`.
+        Then updates `self.cps_bg_removed`.
+
+        Parameters
+        ----------
+        bg : float, optional
+            Background level in counts/s per spectral pixel (before applying UVIS binning).
+        bg_uncertainty : float, optional
+            1-sigma uncertainty on `bg`, same units as `bg`.
+        **kwargs
+            Passed to `get_background()` when estimating the background.
+
+        Notes
+        -----
+        `self.cps_bg_removed` is computed as:
+            cps_bg_removed = cps - bg * SPATIAL_BIN * SPECTRAL_BIN
+
+        If the observation is already calibrated, this method refreshes the calibrated
+        data to reflect the updated background.
+        """
+
         if bg is None and bg_uncertainty is None :
             self.background_level, self.background_error = self.get_background(**kwargs)
         else :
@@ -1848,100 +2061,205 @@ class UVIS_Observation:
         self.is_bkg_removed = True
 
 
+
     # -------- BINNING
     def bin_pixels(
         self,
-        keys= ('lat', 'alt','lt'),
-        bin_boundaries= (
+        pixels: Sequence[Sequence[int]] | Sequence[Sequence[Sequence[int]]] | None = None,
+        keys: tuple[str, ...] = ('lat', 'alt','lt'),
+        bin_boundaries: tuple[Sequence[float], ...] = (
             default_lat_bins,
             default_alt_bins,
             [0,12,24]
         ),
         mode: Literal['center', 'all'] = 'center'
-    ):
+    ) -> 'UVIS_Bin':
         """
-        Bin each pixel into a multidimensional bin structure (self.bins) based on provided boundaries.
+        Bin detector pixels either automatically using geometric criteria or manually
+        using explicit pixel indices.
 
-        In 'center' mode, a single representative value per property (e.g., the pixel center)
-        is used and must satisfy boundaries[0] <= value < boundaries[-1].
-        In 'all' mode, all values of the pixel must fall into the same bin; otherwise, the pixel is ignored.
+        Two mutually exclusive binning modes are supported:
 
-        Each cell in the resulting array (which is a list) accumulates (i_pic, i_pix) tuples corresponding
-        to valid pixels.
+        1) Automatic (geometric) binning
+        Pixels are assigned to bins based on geometric quantities stored in
+        ``pixel_LOS`` (e.g. latitude, altitude, local time), using user-defined
+        bin boundaries.
+
+        2) Manual binning
+        Pixels are grouped explicitly by providing their detector indices
+        ``(i_pic, i_pix)``. In this mode, no geometric selection is performed.
 
         Parameters
         ----------
-        keys : Tuple[str, ...]
-            Names of the pixel properties (e.g., ('lat', 'alt')) available in self.pixel_LOS.
-        bin_boundaries : Tuple[List[float], ...]
-            A tuple of lists defining the bin edges for each property. Bins are defined as [edge_i, edge_i+1),
-            except for the last bin which includes its upper edge.
-        mode : Literal['center', 'all']
-            The binning mode:
-                - 'center': use a single representative value.
-                - 'all': require that all values in the pixel fall within the same bin.
+        pixels : sequence or None, optional
+            Manual pixel selection. If None, automatic geometric binning is used.
+
+            Accepted formats are:
+            - ``[(i, j), (i, j), ...]`` :
+            a single bin containing all listed pixels.
+            - ``[[(i, j), ...], [(i, j), ...], ...]`` :
+            multiple bins, each defined by its own list of pixels.
+
+            Indices are interpreted as ``(exposure_index, pixel_index)``.
+
+        keys : tuple of str, optional
+            Geometric quantities used for automatic binning. Each key must correspond
+            to a field in ``pixel_LOS``.
+
+            Accepted values are:
+            - ``'lon'``   : longitude of the tangent point of the line of sight
+            - ``'lat'``   : latitude
+            - ``'alt'``   : altitude
+            - ``'sza'``   : solar zenith angle
+            - ``'phase'`` : phase angle
+            - ``'ems'``   : emission angle
+            - ``'lt'``    : local time
+
+        bin_boundaries : tuple of sequences, optional
+            Bin boundaries for each geometric key. The number of boundary arrays
+            must match the number of keys.
+
+        mode : {'center', 'all'}, optional
+            Selection mode for geometric binning:
+            - ``'center'`` : use the central LOS value of each pixel.
+            - ``'all'``    : require all LOS samples of the pixel to fall within
+                            the bin boundaries.
+
+        Returns
+        -------
+        UVIS_Bin
+            A ``UVIS_Bin`` instance containing the binned pixel indices and,
+            if geometry is available, the mean geometric properties per bin.
 
         Raises
         ------
+        RuntimeError
+            If automatic binning is requested but ``pixel_LOS`` is not set.
         ValueError
-            If the number of keys does not match the number of bin_boundaries sets.
-        """
+            If input formats are invalid or inconsistent.
 
+        Examples
+        --------
+        Automatic geometric binning by altitude and latitude::
+
+            bins = uvis_obs.bin_pixels(
+                keys=('alt', 'lat'),
+                bin_boundaries=(
+                    np.arange(500, 1000, 50),   # altitude bins (km)
+                    np.linspace(-90, 90, 19)    # latitude bins (deg)
+                ),
+                mode='center'
+            )
+
+        Manual binning of explicitly selected pixels into a single bin::
+
+            bins = uvis_obs.bin_pixels(
+                pixels=[(20, 39), (21, 40), (22, 41)]
+            )
+
+        Manual binning into multiple independent bins::
+
+            bins = uvis_obs.bin_pixels(
+                pixels=[
+                    [(20, 39), (21, 40)],
+                    [(10, 5), (10, 6), (10, 7)]
+                ]
+            )
+        """
+        
         print('Creating bins...', end='', flush=True)
 
-        if len(keys) != len(bin_boundaries):
-            raise ValueError("The number of 'keys' must match the number of 'bin_boundaries' sets.")
-        
+        # GEOMETRIC MODE
+        if pixels is None:
+            # Error checks
+            if self.pixel_LOS is None:
+                raise RuntimeError("pixel_LOS is not set. Call set_geometry() first.")
+            if len(keys) != len(bin_boundaries):
+                raise ValueError("The number of 'keys' must match the number of 'bin_boundaries' sets.")
+            if mode not in ("center", "all"):
+                raise ValueError("mode must be 'center' or 'all'")
+            available = set(self.pixel_LOS.dtype.names)
+            missing = [k for k in keys if k not in available]
+            if missing:
+                raise ValueError(f"Unknown LOS keys: {missing}. Available: {sorted(available)}")
 
-        bins = UVIS_Bin(keys,bin_boundaries, self)
 
-        for i_pic in range(self.n_pics):
-            for i_pix in range(self.n_pixels):
-                if i_pix==59 : continue
-                
-                if self.pixel_corrupted[i_pic,i_pix] or self.pixel_stars_mask[i_pic,i_pix] : continue
+            # Initialize bins
+            shape = tuple(len(bounds) - 1 for bounds in bin_boundaries)
+            bins = UVIS_Bin(shape, self, bin_attributes=keys, bin_boundaries=bin_boundaries)
+            bins.bin_def = {key:bin_boundary for key,bin_boundary in zip(keys, bin_boundaries)}
 
-                if   mode == 'center':
-                    pixel_properties = [self.pixel_LOS[key][i_pic, i_pix, 0] for key in keys]
-                elif mode == 'all':
-                    pixel_properties = [self.pixel_LOS[key][i_pic, i_pix, :] for key in keys]
+            for i_pic in range(self.n_pics):
+                for i_pix in range(self.n_pixels):
+                    if i_pix==59 : continue
+                    
+                    if self.pixel_corrupted[i_pic,i_pix] or self.pixel_stars_mask[i_pic,i_pix] : continue
 
-                bin_indices = []
-                valid = True
-                
-                # Determine the bin index for each property.
-                for dim_idx, prop in enumerate(pixel_properties):
-                    idx = find_bin_index(prop, bin_boundaries[dim_idx], mode)
-                    if idx is None:
-                        valid = False
-                        break
-                    bin_indices.append(idx)
+                    if   mode == 'center':
+                        pixel_properties = [self.pixel_LOS[key][i_pic, i_pix, 0] for key in keys]
+                    elif mode == 'all':
+                        pixel_properties = [self.pixel_LOS[key][i_pic, i_pix, :] for key in keys]
 
-                # If the pixel is valid in all dimensions, add it to the corresponding bin.
-                if valid:
-                    # Use tuple indexing to access the cell in the NumPy array.
-                    bins.bins[tuple(bin_indices)].append((i_pic, i_pix))
-                    bins.number_per_bin[tuple(bin_indices)] += 1
+                    bin_indices = []
+                    valid = True
+                    
+                    # Determine the bin index for each property.
+                    for dim_idx, prop in enumerate(pixel_properties):
+                        idx = find_bin_index(prop, bin_boundaries[dim_idx], mode)
+                        if idx is None:
+                            valid = False
+                            break
+                        bin_indices.append(idx)
 
+                    # If the pixel is valid in all dimensions, add it to the corresponding bin.
+                    if valid:
+                        # Use tuple indexing to access the cell in the NumPy array.
+                        bins.bins[tuple(bin_indices)].append((i_pic, i_pix))
+                        bins.number_per_bin[tuple(bin_indices)] += 1
+
+        #MANUAL MODE
+        else:
+            if len(pixels) == 0:
+                raise ValueError("Pixel list is empty.")
+            # Determine the number of dimensions
+            first_bin = np.asarray(pixels[0])
+
+            if first_bin.ndim == 1 and first_bin.shape == (2,):
+                # single bin: [(i,j), (i,j), ...]
+                groups = [np.asarray(pixels, dtype=int)]
+
+            elif first_bin.ndim == 2 and first_bin.shape[1] == 2:
+                # multiple bins: [[(i,j), ...], [(i,j), ...], ...]
+                groups = []
+                for k, grp in enumerate(pixels):
+                    arr = np.asarray(grp, dtype=int)
+                    if arr.ndim != 2 or arr.shape[1] != 2:
+                        raise ValueError(f"Bin {k} has shape {arr.shape}, expected (n_i, 2)")
+                    groups.append(arr)
+
+            else:
+                raise ValueError(
+                    "Invalid pixels list format. Expected pixels of indices (i, j):\n"
+                    "- [(i,j), ...] for a single bin\n"
+                    "- [[(i,j), ...], ...] for multiple bins"
+                )
+            
+            bins = UVIS_Bin((len(groups),), self)
+            for b, group in enumerate(groups):
+                for i_pic, i_pix in group:
+                    if not (0 <= i_pic < self.n_pics and 0 <= i_pix < self.n_pixels):
+                        raise IndexError(f"Invalid pixel index {(i_pic, i_pix)}")
+                bins.bins[b].extend(map(tuple, group))
+                bins.number_per_bin[b] += len(group)
 
         # MEAN PIXEL GEOMETRIC PROPERTIES
-        for idx in np.ndindex(bins.bins.shape):
-            pairs = bins.bins[idx]
-            if not pairs:  # Empty bin
-                continue
-            # print(list(bins.bin_LOS.dtype.names))
-            for key in self.pixel_LOS.dtype.names:
-
-                # print(key)
-                # print([self.pixel_LOS[i, j,:][key] for (i, j) in pairs])
-
-                # print(np.mean([self.pixel_LOS[i, j,:][key] for (i, j) in pairs]))
-                # print('eeee')
-                # print(bins.bin_LOS[idx][key])
-                
-                bins.bin_LOS[idx][key] = np.mean([self.pixel_LOS[i, j,:][key] for (i, j) in pairs])
-                # print(bins.bin_LOS[idx][key])
-
+        if self.pixel_LOS is not None:
+            for idx in np.ndindex(bins.bins.shape):
+                pairs = bins.bins[idx]
+                if not pairs:  # Empty bin
+                    continue
+                for key in self.pixel_LOS.dtype.names:
+                    bins.bin_LOS[idx][key] = np.mean([self.pixel_LOS[i, j,:][key] for (i, j) in pairs])
 
         print(' Done')
         return bins

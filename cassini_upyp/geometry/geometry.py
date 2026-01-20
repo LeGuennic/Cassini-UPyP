@@ -258,7 +258,7 @@ class Geometry:
             #----------------------
             self.other_targets=[]
 
-            if other_bodies :
+            if other_bodies is not None and len(other_bodies) > 0:
                 other_bodies = [e.upper() for e in other_bodies]
 
                 for target2 in other_bodies :

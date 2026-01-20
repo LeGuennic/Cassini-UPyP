@@ -14,6 +14,9 @@ OFFSET = [0, 75, 0]
 lon_line_grid = [0, 60, 120, 180, 240, 300]
 lat_line_grid = [-60, -30, 0, 30, 60]
 
+# Background color
+BACKGROUND_COLOR = "black"
+
 # PLOTS CONFIGURATION
 
 # Latitude and longitude grid
@@ -24,9 +27,6 @@ marker = "."
 markersize = 0.5
 ls = ""
 zorder = 3
-
-# Background color
-BACKGROUND_COLOR = "black"
 
 # Right ascension and declination lines
 [RADEC_LINES]
