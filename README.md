@@ -95,7 +95,7 @@ In both cases, you must at minimum provide a valid LSK and SCLK, and ensure that
 
 Create an observation from one or more UVIS PDS base paths (with or without extension). Each product is expected to have matching .LBL and .DAT files.
 
-```
+```python
 from cassini_upyp import UVIS_Observation
 
 obs = UVIS_Observation(
@@ -105,7 +105,7 @@ obs = UVIS_Observation(
 
 You can also pass multiple files:
 
-```
+```python
 obs = UVIS_Observation(
     "/path/to/file_1",
     "/path/to/file_2",
@@ -114,7 +114,9 @@ obs = UVIS_Observation(
 
 Or use a batch list file (one base path per line), using paths relative to the batch file directory or absolute paths:
 
-`obs = UVIS_Observation(batch="/path/to/batch_list.txt")`
+```python
+obs = UVIS_Observation(batch="/path/to/batch_list.txt")
+```
 
 Typical processing steps depend on what you need, but the workflow generally includes:
 - background estimation/removal
