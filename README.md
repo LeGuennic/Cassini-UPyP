@@ -6,7 +6,7 @@ This is not meant to be a black-box “push button, get science” package. The 
 
 An example notebook is available in example/example.ipynb.
 
-## Design choices (read this first)
+## Design choices
 
 This repository relies on user-editable TOML configuration files stored in user_config/:
 
@@ -80,14 +80,36 @@ This file controls plotting parameters used by geometry/plotting helpers:
 
 If you do not use plotting helpers, you may not need to touch this file, but it is kept user-editable by design.
 
-## External resources
+## Required external resources
 
-This repository does not bundle mission resources such as:
-- SPICE kernels (CK, SPK, FK, IK, LSK, etc.)
-- UVIS calibration tables/files
-- star catalog file used by some masking/validation utilities
+This code requires a small set of external resources that are not bundled with the repository. They must be referenced from `user_config/env.toml`.
 
-You must provide those locally and set the paths in user_config/env.toml.
+1) UVIS calibration files
+You must provide the UVIS calibration files directory. These files are required for calibration and related flat field correction steps. Set the corresponding path in `user_config/env.toml:calibration_dir`.
+
+2) SPICE kernels (geometry)
+SPICE kernels are required to compute observation geometry. You can use either of the two supported approaches:
+
+A) Full kernel tree (automatic kernel selection)
+Place your locally downloaded kernels using the following subdirectory layout:
+
+spice_kernels/
+  ck/
+  fk/
+  ik/
+  lsk/
+  mk/
+  pck/
+  sclk/
+  spk/
+
+With this layout, the geometry code can automatically search for and load the appropriate kernels (depending on observation time, frames, and target).
+
+B) Manual kernel list (explicit kernel loading)
+If you prefer not to maintain a full kernel tree, you may explicitly provide the list of required kernels to the geometry routines, or a metakernel file. The geometry layer supports passing a manual kernel list (for example: LSK + SCLK + one or more SPK/CK/FK/IK/PCK as needed). In this mode, kernel selection is fully controlled by the user and the code will not attempt to discover kernels automatically.
+
+In both cases, you must at minimum provide a valid LSK and SCLK, and ensure that the UVIS IK is available if instrument frame definitions are needed. The exact CK/SPK/PCK/FK requirements depend on the specific geometry you want to compute and the time span of the observation.
+
 
 ## Quick start
 
