@@ -63,6 +63,7 @@ def plot(
 
     ax: "plt.Axes" | None = None,
     pixel_notes: Literal['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt"] | None = None,
+    pixel_numbers: bool = True,
     dpi: float = 1900 / 5,
 ) -> "plt.Axes":
 
@@ -118,6 +119,8 @@ def plot(
         Axes to draw on. If None, a new figure/axes is created.
     pixel_notes : {'lon', 'lat', 'alt', 'sza', 'phase', 'ems', 'lt'} or None, default=None
         If provided, annotate each used pixel with the corresponding LOS parameter field.
+    pixel_numbers : bool, default=True
+        If True, annotate first and last pixel with its pixel number to help identify the UVIS slit orientation.
     dpi : float or int, default=1900/5
         DPI used when saving the figure.
 
@@ -298,7 +301,25 @@ def plot(
                     (g_obj.target_center[frame][0], g_obj.target_center[frame][1]), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=8)
 
         # PIXEL PARAMETERS (LOS PROPERTIES)
-        if pixel_notes :
+        if pixel_numbers:
+            # First pixel
+            xi, yi = sum(g_obj.used_pixels[frame][0,1:3,0])/2, sum(g_obj.used_pixels[frame][0,1:3,1])/2
+            ax.text(
+                xi, yi, "0",
+                color='white', fontsize=8,
+                ha='center', va='center',
+                clip_on=True, zorder=21
+                )
+            # Last pixel
+            xi, yi = sum(g_obj.used_pixels[frame][-1,1:3,0])/2, sum(g_obj.used_pixels[frame][-1,1:3,1])/2
+            ax.text(
+                xi, yi, f"{len(g_obj.used_pixels[frame])-1}",
+                color='white', fontsize=8,
+                ha='center', va='center',
+                clip_on=True, zorder=21
+                )
+
+        if pixel_notes:
             # Error handling
             names = g_obj.used_pixels_LOS.dtype.names
             if (names is None) or (pixel_notes not in names):

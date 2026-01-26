@@ -44,7 +44,8 @@ from .config.uvis import (
     pixel_bandpasses,
     slit_ratios,
     sctimeburn,
-    slit_dlambda
+    slit_dlambda,
+    slit_width
 )
 from .utils import env_config, list_ndarray, find_bin_index
 env = env_config()
@@ -131,7 +132,8 @@ def pds_lbl(labelfile: str | Path) -> "AttrDict":
 
     return AttrDict(label)
 
-def read_binary_pds(filename_dat: str | Path, data_dims: tuple[int, int, int], data_type: str | np.dtype, endian: Literal['big', 'little'] = 'big') -> np.ndarray | None:
+
+def pds_dat(filename_dat: str | Path, data_dims: tuple[int, int, int], data_type: str | np.dtype, endian: Literal['big', 'little'] = 'big') -> np.ndarray:
     """
     Read a binary PDS (Planetary Data System) data file and return its contents as a NumPy array.
 
@@ -145,6 +147,7 @@ def read_binary_pds(filename_dat: str | Path, data_dims: tuple[int, int, int], d
         Path to the binary PDS data file.
     data_dims : tuple of int
         Dimensions of the data in the order (BAND, LINE, SAMPLE).
+
         - BAND   : Number of spectral pixels
         - LINE   : Number of spatial pixels  
         - SAMPLE : Number of exposures
@@ -156,10 +159,9 @@ def read_binary_pds(filename_dat: str | Path, data_dims: tuple[int, int, int], d
 
     Returns
     -------
-    numpy.ndarray or None
+    numpy.ndarray
         A NumPy array containing the data reshaped into a cube with dimensions 
-        (SAMPLE, LINE, BAND). Returns `None` if there is an error in reading 
-        or reshaping the data.
+        (SAMPLE, LINE, BAND).
 
     Notes
     -----
@@ -168,7 +170,7 @@ def read_binary_pds(filename_dat: str | Path, data_dims: tuple[int, int, int], d
 
     Examples
     --------
-    >>> cube = read_binary_pds("data.dat", (3, 64, 1024), "float32")
+    >>> cube = pds_dat("data.dat", (3, 64, 1024), "float32")
     >>> cube.shape
     (1024, 64, 3)
 
@@ -226,18 +228,77 @@ class AttrDict(dict):
 
 class Instrument(AttrDict):
     """
-    UVIS-like instrument description based on SPICE kernels.
+    UVIS-like instrument geometry derived from SPICE kernels.
 
-    This class queries the SPICE instrument kernel to retrieve:
-    - instrument ID code,
-    - field of view (shape, frame, boresight, corners),
-    - total FOV height/width (in degrees),
-    - per-pixel angular size,
-    - pixel corner directions in the instrument frame.
+    This class queries the SPICE instrument kernel (IK) for the requested
+    instrument (UVIS and specific slit) and builds a simple field-of-view
+    model based on the corresponding slit.
 
-    The pixel grid is assumed to be a 1-D slit with `n_pixels` samples
-    along the spatial direction. Pixel corners are computed in angular
-    coordinates and converted to unit vectors in the instrument frame.
+    The pixel grid is modeled as a 1-D slit with `n_pixels` samples along
+    the spatial direction. Pixel corner directions are computed in angular
+    coordinates and converted to unit vectors expressed in the instrument
+    frame.
+
+    Parameters
+    ----------
+    instrument_name : str
+        SPICE name of the instrument (e.g., a UVIS channel name resolvable
+        by SPICE). This string is passed to SPICE to resolve the instrument
+        ID (NAIF ID code).
+    n_pixels : int, optional
+        Number of spatial pixels used to sample the slit. Default is 64.
+
+    Attributes
+    ----------
+    name : str
+        Instrument name as provided by the user.
+    ID : int
+        NAIF instrument ID code resolved from `instrument_name`.
+    shape : str
+        FOV shape returned by SPICE (e.g., "RECTANGLE").
+    frame : str
+        Instrument frame name in which the FOV geometry is expressed.
+    bsight : numpy.ndarray
+        Boresight direction (3-vector) in the instrument frame.
+    corners : numpy.ndarray
+        FOV corner directions (vectors) (shape: (4, 3)) in the instrument frame.
+    fov_height : float
+        Total FOV height in degrees.
+    fov_width : float
+        Total FOV width in degrees.
+    n_pixels : int
+        Number of spatial pixels along the slit, given in argument.
+    pixel_height : float
+        Angular height of one pixel in degrees.
+    pixel_width : float
+        Angular width of one pixel in degrees.
+    pixels_corners : numpy.ndarray
+        Direction vectors for pixel center and corners in the instrument
+        frame (shape: (n_pixels, 5, 3)).
+
+        The second dimension uses the following order:
+        center, bottom-left, bottom-right, upper-right, upper-left.
+
+    Notes
+    -----
+    - Angular quantities `fov_height`, `fov_width`, `pixel_height`, and
+      `pixel_width` are expressed in degrees.
+    - This initializer loads and unloads the instrument kernel (IK). Make
+      sure the kernel file path is correctly set in `env.toml` config file.
+
+    Raises
+    ------
+    spiceypy.utils.exceptions.SpiceyError
+        If SPICE cannot resolve the instrument name, access the kernel
+        pool variables, or compute the FOV geometry.
+
+    Examples
+    --------
+    Create a 64-pixel slit model from SPICE IK:
+
+    >>> inst = Instrument("CASSINI_UVIS_FUV", n_pixels=64)
+    >>> inst.pixels_corners.shape
+    (64, 5, 3)
     """
 
     def __init__(self, instrument_name: str, n_pixels: int = 64) -> None:
@@ -304,65 +365,59 @@ class Instrument(AttrDict):
         self.pixels_corners = pixels_corners # / np.linalg.norm(pixels_corners, axis=-1, keepdims=True)
 
 
-class pds_raw_data:
+class PDSRawData:
     """
-    Raw PDS (Planetary Data System) data from the Cassini UVIS instrument.
+    Raw PDS (Planetary Data System) data from the Cassini Ultraviolet Imaging Spectrograph (UVIS).
 
-    This class wraps:
-    - the raw detector counts read from the .DAT file,
-    - the label metadata parsed from the .LBL file,
-    - a convenient view of the QUBE structure,
-    - basic derived quantities (channel, slit state, pixel bandpass,
-      slit ratio, integration duration, etc.),
-    and provides methods (e.g. ``get_calibration``) to build calibrated
-    UVIS spectra.
+    This class represents a single Cassini/UVIS observation stored in PDS3
+    format. It requires a binary data file (``.DAT``) containing the raw
+    detector counts and a label file (``.LBL``) providing the associated
+    metadata.
 
-    Typical usage is via the ``read_pds`` function, which constructs a
-    :class:`pds_raw_data` from matching .DAT/.LBL files.
+    The object wraps:
+
+    - the raw detector counts read from the ``.DAT`` file,
+    - the parsed PDS label metadata from the ``.LBL`` file,
+    - basic derived quantities such as the UVIS channel, slit state,
+      pixel bandpass, slit ratio, and integration duration.
+
+    Parameters
+    ----------
+    filename : str or pathlib.Path
+        Either a base filename without extension (e.g.
+        ``"FUV2006_015_14_47"``), in which case ``<name>.DAT`` and
+        ``<name>.LBL`` are used, or a path to a ``.DAT`` or ``.LBL`` file.
+        In the latter case, `file2` must be provided and point to the
+        matching file.
+    file2 : str or pathlib.Path, optional
+        Second file corresponding to `filename` when an explicit
+        ``.DAT`` or ``.LBL`` file is provided. Default is ``None``.
+    no_extract : bool, optional
+        If ``False`` (default), the raw data cube is spatially and
+        spectrally cropped according to the window boundaries and
+        binning parameters defined in the PDS label. If ``True``, the
+        full data cube stored in the ``.DAT`` file is kept.
+
+    Raises
+    ------
+    ValueError
+        If the ``.DAT``/``.LBL`` pairing is invalid, if one of the files
+        is missing, or if the data type defined by the
+        ``CORE_ITEM_TYPE`` / ``CORE_ITEM_BYTES`` combination is not
+        recognized.
+    
+    Examples
+    --------
+    Read a PDS file set by specifying the base filename without extension:
+
+    >>> data_pds = PDSRawData('example_file')
+
+    Read a PDS file set by specifying both the label and data files explicitly:
+
+    >>> data_pds = PDSRawData('data_file.DAT', 'label_file.LBL')
     """
 
-    def __init__(self, filename: str | Path = None, file2: str | Path = None, no_extract: bool = False) -> None:
-        """
-        Read PDS (Planetary Data System) raw files from the Cassini UVIS instrument.
-
-        This function reads raw data files from the Cassini Ultraviolet Imaging Spectrograph (UVIS).
-        It requires two files: a binary data file (.DAT) containing raw counts from the detector,
-        and a label text file (.LBL) containing metadata about the observation.
-
-        Parameters
-        ----------
-        filename : str or Path
-            Either:
-            - base filename without extension (e.g. "FUV2006_015_14_47"),
-              in which case ``<name>.DAT`` and ``<name>.LBL`` are used, or
-            - path to a .DAT or .LBL file. In that case, `file2` must be
-              the corresponding .LBL or .DAT file.
-        file2 : str or pathlib.Path, optional
-            Second file (the .DAT or .LBL matching `filename`) when
-            `filename` is given with an extension. Default is None.
-        no_extract : bool, optional
-            If False (default), the raw data cube is spatially/spectrally
-            cropped according to the window boundaries and binning
-            parameters given in the label. If True, the full cube as
-            stored in the .DAT file is kept.
-
-        Raises
-        ------
-        ValueError
-            If the .DAT/.LBL pairing is invalid, if one of the files is
-            missing, or if the CORE_ITEM_TYPE / CORE_ITEM_BYTES
-            combination is not recognized.
-        
-        Examples
-        --------
-        Read a PDS file set by specifying the base filename without extension:
-
-        >>> data_pds = pds_raw_data('example_file')
-
-        Read a PDS file set by specifying both the label and data files explicitly:
-
-        >>> data_pds = pds_raw_data('data_file.DAT', 'label_file.LBL')
-        """
+    def __init__(self, filename: str | Path, file2: str | Path = None, no_extract: bool = False) -> None:
 
         filename = Path(filename)
     
@@ -413,7 +468,7 @@ class pds_raw_data:
         else : raise ValueError("Unrecognized data type: "+str(self.qube.CORE_ITEM_TYPE))
 
         # Read
-        self.raw_data = read_binary_pds(filename_dat=filedat, data_dims=data_dims, data_type=data_type)
+        self.raw_data = pds_dat(filename_dat=filedat, data_dims=data_dims, data_type=data_type)
         self.samples  = self.raw_data.shape[0]
         # data[SAMPLE, LINE, BAND]
 
@@ -434,39 +489,35 @@ class pds_raw_data:
         self.slit_ratio   = slit_ratios[self.channel][self.slit]
 
         self.INTEGRATION_DURATION = float(self.label.INTEGRATION_DURATION.split()[0])
-
+pds_raw_data = PDSRawData
 
 class UVIS_Bin:
     """
-    Container class holding the result of a pixel binning operation.
+    Container holding the result of a pixel binning operation.
 
-    A ``UVIS_Bin`` instance stores:
-    - the list of detector pixels associated with each bin,
-    - the number of pixels per bin,
-    - optional bin definitions (geometric boundaries),
-    - mean geometric line-of-sight (LOS) properties per bin,
-    - references to the unbinned observational data.
+    A UVIS_Bin instance stores:
+
+    - the mapping between detector pixels and bins,
+    - per-bin population statistics,
+    - optional bin definitions (e.g., geometric boundaries),
+    - per-bin geometric line-of-sight (LOS) properties,
+    - references to the original unbinned observation arrays.
 
     The class is agnostic to how bins are constructed: bins may result from
-    automatic geometric binning or from explicit manual pixel grouping.
+    automatic geometric binning or explicit manual pixel grouping.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        Shape of the bin grid. Each element corresponds to the number of bins
+        along one binning dimension. For manual binning this is typically
+        (n_bins,).
+    uvis_obs : UVIS_Observation
+        Parent observation providing the unbinned data arrays and geometry.
     """
 
 
     def __init__(self, shape: tuple[int, ...], uvis_obs: UVIS_Observation) -> None:
-        """
-        Initialize a bin container with a given bin grid shape.
-
-        Parameters
-        ----------
-        shape : tuple of int
-            Shape of the bin grid. Each element corresponds to the number of bins
-            along one binning dimension. For manual binning, this is typically
-            ``(n_bins,)``.
-
-        uvis_obs : UVIS_Observation
-            Parent observation object from which the unbinned data and geometry
-            are taken.
-        """
 
         self.bins = list_ndarray(shape)
         self.bin_def = None
@@ -477,13 +528,14 @@ class UVIS_Bin:
         self.bin_LOS   = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
 
         # Unbinned data
-        self.name = uvis_obs.name
-        self.data = uvis_obs.data
-        self.uncertainty_sup = uvis_obs.uncertainty_sup
-        self.uncertainty_inf = uvis_obs.uncertainty_inf
-        self.WL = uvis_obs.WL
+        self.name = np.copy(uvis_obs.name)
+        self.data = np.copy(uvis_obs.data)
+        self.uncertainty_sup = np.copy(uvis_obs.uncertainty_sup)
+        self.uncertainty_inf = np.copy(uvis_obs.uncertainty_inf)
+        self.WL = np.copy(uvis_obs.WL)
 
         self.slit_width = uvis_obs.slit_width
+        self.slit_dlambda = uvis_obs.slit_dlambda
         self.HD = uvis_obs.HD
 
         self.bin_averaged   = False
@@ -493,13 +545,14 @@ class UVIS_Bin:
         """
         Compute per-bin mean spectra and uncertainties.
 
-        For each bin (a list of pixel index pairs), this method computes:
+        For each bin, this method computes [1]:
+
         - an unweighted mean spectrum, sample standard deviation (ddof=1),
-        and standard error of the mean (with small-sample correction),
+          and corrected standard error of the mean,
         - a weighted mean spectrum using 1/σ² weights, where σ is the
-        symmetric uncertainty (0.5*(sup+inf)),
+          symmetric uncertainty (0.5*(sup+inf)),
         - propagated upper and lower uncertainties for the weighted mean
-        using sqrt(1 / sum(1/σ²)) for each wavelength.
+          for each wavelength.
 
         Empty bins are left as NaN. Results are stored as attributes and
         ``self.bin_averaged`` is set to True.
@@ -507,20 +560,25 @@ class UVIS_Bin:
         Returns
         -------
         None
-        Results are stored as attributes:
 
-        - `bin_mean_spectrum` : ndarray
+        Attributes
+        ----------
+        `bin_mean_spectrum` : ndarray
             Unweighted mean spectrum per bin.
-        - `bin_stddev_spectrum` : ndarray
+        `bin_stddev_spectrum` : ndarray
             Unweighted standard deviation per bin.
-        - `bin_stderr_spectrum` : ndarray
+        `bin_stderr_spectrum` : ndarray
             Unweighted standard error per bin (with small-sample correction).
-        - `bin_wmean_spectrum` : ndarray
+        `bin_wmean_spectrum` : ndarray
             Weighted mean spectrum per bin.
-        - `bin_u_sup_spectrum` : ndarray
+        `bin_u_sup_spectrum` : ndarray
             Propagated upper uncertainty of weighted mean per bin.
-        - `bin_u_inf_spectrum` : ndarray
+        `bin_u_inf_spectrum` : ndarray
             Propagated lower uncertainty of weighted mean per bin.
+
+        References
+        ----------
+        [1] Le Guennic et al. (2026)
         """
 
         bin_shape = self.bins.shape
@@ -588,65 +646,67 @@ class UVIS_Bin:
             
         self.bin_averaged = True
 
-    def integrate(self, wl_range: tuple[float, float] = (1600,1900), uncertainty: bool = True, method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') -> None:
+    def integrate(self, wl_range: tuple[float, float] | None = None, uncertainty: bool = True, method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') -> None:
         """
         Integrate spectra over a wavelength band and compute per-bin integrated products.
 
         This method performs three integration tasks:
-        1. Integrates the raw pixel-level spectra and uncertainties.
-        2. Averages these integrated values within each bin.
-        3. If bins have already been averaged (via `average_bins`), also integrates
-           the bin-averaged spectra.
+
+        - Integrates the raw pixel-level spectra and uncertainties [1].
+        - Averages these integrated values within each bin.
+        - If bins have already been averaged (via :meth:`average`), also integrates
+          the bin-averaged spectra.
 
         Parameters
         ----------
-        wl_range : (float, float), optional
-            Integration bounds (min_wl, max_wl). Default is (1600, 1900).
+        wl_range : tuple of float, optional
+            Integration bounds (min_wl, max_wl).
         uncertainty : bool, optional
-            If True (default), uncertainty arrays are integrated in quadrature
-            under the integral (see ``integrate_spectrum``).
+            If True (default), uncertainty spectra are propagated under the
+            integral (see :func:`integrate_spectrum`).
         method : {"simpson", "trapezoid", "trapz"}, optional
-            Numerical integration method passed to ``integrate_spectrum``.
+            Numerical integration method passed to :func:`integrate_spectrum`.
+            `trapz` is an alias for `trapezoid`.
             Default is "simpson".
 
         Returns
         -------
         None
-        Results are stored as attributes:
 
-        Pixel-level integrated data:
-        - `integrated_data` : ndarray
+        Attributes
+        -----
+        integrated_data : ndarray
             Integrated spectrum for each pixel.
-        - `integrated_uncertainty_sup` : ndarray
+        integrated_uncertainty_sup : ndarray
             Integrated upper uncertainty for each pixel.
-        - `integrated_uncertainty_inf` : ndarray
+        integrated_uncertainty_inf : ndarray
             Integrated lower uncertainty for each pixel.
-
-        Binned integrated data:
-        - `binned_integrated_data` : ndarray
-            Mean of integrated pixel values per bin.
-        - `binned_integrated_uncertainty_sup` : ndarray
-            Propagated upper uncertainty per bin.
-        - `binned_integrated_uncertainty_inf` : ndarray
-            Propagated lower uncertainty per bin.
-        - `bin_stddev` : ndarray
+        binned_integrated_data : ndarray
+            Mean of integrated spectra of each pixel per bin.
+        binned_integrated_uncertainty_sup : ndarray
+            Mean of integrated upper uncertainty of each pixel per bin.
+        binned_integrated_uncertainty_inf : ndarray
+            Mean of integrated lower uncertainty of each pixel per bin.
+        bin_stddev : ndarray
             Standard deviation of integrated values per bin.
-        - `bin_stderr` : ndarray
+        bin_stderr : ndarray
             Standard error of integrated values per bin.
-
-        If `self.bin_averaged` is True, also creates:
-        - `integrated_avrg_data` : ndarray
+        integrated_avrg_data : ndarray
             Integration of unweighted bin-averaged spectra.
-        - `integrated_avrg_data_w` : ndarray
+        integrated_avrg_data_w : ndarray
             Integration of weighted bin-averaged spectra.
-        - `integrated_avrg_stddev` : ndarray
-            Integration of bin standard deviation spectra.
-        - `integrated_avrg_stderr` : ndarray
-            Integration of bin standard error spectra.
-        - `integrated_avrg_uncertainty_sup` : ndarray
+        integrated_avrg_stddev : ndarray
+            Integration of bin standard deviation spectrum.
+        integrated_avrg_stderr : ndarray
+            Integration of bin standard error spectrum.
+        integrated_avrg_uncertainty_sup : ndarray
             Integration of bin upper uncertainty spectra.
-        - `integrated_avrg_uncertainty_inf` : ndarray
+        integrated_avrg_uncertainty_inf : ndarray
             Integration of bin lower uncertainty spectra.
+
+        References
+        ----------
+        [1] Le Guennic et al. (2026)
         """
 
         # Integrate spectra
@@ -708,10 +768,20 @@ class UVIS_Bin:
         Parameters
         ----------
         show : bool, optional
-            If True (default), call ``plt.show()``. If False, the figure is
-            returned for further customization/saving.
-        fmt : str, optional
-            Format string used for the bin-center labels (default: ".0f").
+            If True (default), call plt.show(). The figure and axes are still
+            returned.
+        
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The created figure.
+        ax : matplotlib.axes.Axes
+            The created axes.
+
+        Raises
+        ------
+        ValueError
+            If the bin grid is not 2D.
 
         Notes
         -----
@@ -750,53 +820,29 @@ class UVIS_Bin:
         if show: plt.show()
         return fig, ax
 
-    def __repr__(self):
-        """
-        Return a string representation of the UVIS_Bin object.
-
-        Returns
-        -------
-        str
-            Summary of bin configuration and state.
-        """
-        info = f"<UVIS_bin object>\n"
-        info += f"  Observation: {self.name}\n"
-        info += f"  Bin shape  : {self.bins.shape}\n"
-        info += f"  Bin attributes:\n"
-        for key, val in self.bin_def.items():
-            info += f"    - {key}: {len(val)-1} bins ({val[0]} to {val[-1]})\n"
-        info += f"  Bin averaged? {'Yes' if hasattr(self, 'bin_mean_data') else 'No'}"
-        return info
-    
     def save(self, filepath: str | Path, overwrite: bool = False) -> str:
         """
-        Save the UVIS observation data to a binary file.
-        This method serializes the current UVIS observation object to a binary file.
-        The file extension is automatically set to '.uvisbin' if not provided.
+        Save the UVIS_Bin object to disk.
+
+        The file extension is set to ".uvisbin" if not provided.
 
         Parameters
         ----------
-            filepath: (str | Path)
-                The path where the file should be saved. If the path doesn't 
-                have a '.uvisbin' extension, it will be automatically added.
-            overwrite:(bool, optional)
-                If True, existing files will be overwritten without 
-                prompting. If False (default), the user will be prompted for confirmation 
-                before overwriting existing files.
-        
+        filepath : str or Path
+            Output path. If no ".uvisbin" suffix is provided, it is appended.
+        overwrite : bool, optional
+            If True, existing files are overwritten without prompting.
+            If False (default), the user is asked for confirmation.
+
         Returns
         -------
-            str
-                The original filepath parameter that was passed to the method.
+        str or Path
+            The original `filepath` argument.
 
         Notes
         -----
-            - The method uses pickle for serialization, so the saved file will be in binary format
-            - If the file already exists and overwrite=False, the user will be prompted to confirm
-            - The method prints status messages during the save operation
-            - If the user chooses not to overwrite an existing file, the save operation is cancelled
+        The method uses the `pickle` module.
         """
-
 
         p = Path(filepath)
         if p.suffix.lower() != '.uvisbin':
@@ -825,31 +871,230 @@ class UVIS_Bin:
         Parameters
         ----------
         filepath : str or Path
-            Path to the pickle file containing the serialized UVIS_Bin object.
+            Path to the pickle file containing the serialized object.
 
         Returns
         -------
         UVIS_Bin
-            The deserialized UVIS_Bin object loaded from the file.
-            
+            The deserialized UVIS_Bin object.
+
         Raises
         ------
         FileNotFoundError
             If the specified file does not exist.
-        PickleError
+        pickle.UnpicklingError
             If the file cannot be unpickled or is corrupted.
         """
 
         with open(filepath, 'rb') as f:
             return pickle.load(f)
 
+    def __repr__(self):
+        """
+        Return a string representation of the UVIS_Bin object.
+
+        Returns
+        -------
+        str
+            Summary of bin configuration and state.
+        """
+
+        info          = f"<UVIS_bin object>\n"
+        info         += f"  Observation: {self.name}\n"
+        info         += f"  Bin shape  : {self.bins.shape}\n"
+        info         += f"  Bin attributes:\n"
+
+        if self.bin_def is not None:
+            for key, val in self.bin_def.items():
+                info += f"    - {key}: {len(val)-1} bins ({val[0]} to {val[-1]})\n"
+        return info
+
 class UVIS_Observation:
     """
-    Cassini/UVIS observation built from one or several PDS3 products.
+    Cassini/UVIS observation assembled from one or more PDS3 products.
 
-    This class loads UVIS PDS .DAT/.LBL files, concatenates frames, and provides
-    helpers for calibration, background estimation, geometry (SPICE-based),
-    star/corruption masking, and pixel binning.
+    This class loads UVIS PDS3 data/label pairs (``.DAT``/``.LBL``),
+    concatenates exposures in time order, and provides utilities for:
+
+    - calibration (counts/s -> radiance),
+    - background noise estimation and subtraction,
+    - geometry computation from SPICE kernels,
+    - stellar contamination identification,
+    - pixel binning based on geometry or manual selection.
+
+    See [1] for details on UVIS data processing.
+
+    Parameters
+    ----------
+    *files : str or pathlib.Path or iterable of (str or pathlib.Path)
+        One or more PDS base paths (with or without extension). Each entry can be:
+        If a single iterable is passed (e.g. a list of paths), it is unpacked.
+
+        - If exactly two paths are provided and they form a single .LBL/.DAT pair,
+          they are interpreted as one explicit product.
+        - Otherwise, each input is interpreted as a product base path: the extension
+          (if any) is ignored and the corresponding .LBL and .DAT files are expected
+          to share the same base name.
+
+        Strings are treated as paths, not as iterables of characters.
+
+    batch : str or pathlib.Path, optional
+        Path to a text file listing PDS products, one per line.
+
+        Each line may be an absolute path or a path relative to the location of
+        the batch file. Relative paths are interpreted with respect to the
+        directory containing the batch file.
+
+        If ``batch`` is provided, it overrides ``*files``. The same pairing rules
+        apply as for ``*files``: if the batch contains exactly two entries forming
+        a .LBL/.DAT pair, they are treated as a single explicit product;
+        otherwise, each entry is interpreted as a product base path.
+
+    prime_instrument : {"PRIME", "UVIS", "CIRS", "VIMS", "ISS"}, optional
+        Prime instrument tag stored in metadata and used for naming. Default is
+        `"PRIME"`. If `"UVIS"` is provided, it is normalized
+        internally to `"PRIME"`.
+    ID : int, optional
+        Extra identifier used when multiple observations share the same base name.
+        Default is 0 (no identifier).
+    target : str, optional
+        Main target name used for georeference computations. Stored uppercased. Default is ``None``.
+    name : str, optional
+        If provided, overrides the auto-generated observation name.
+        The default name is constructed as:
+        ``CHANNEL_YEAR_DOY_INSTRUMENT(_ID)``
+    sort : bool, optional
+        If True (default), input files (and resulting exposures) are ordered by
+        spacecraft clock start time.
+
+    Attributes
+    ----------
+    name : str
+        Observation name (auto-generated or user-provided).
+    target : str
+        Target name (uppercased).
+    YEAR : int
+        Observation year (from first exposure).
+    DOY : int
+        Day of year of the observation (from first exposure).
+    channel : {"FUV", "EUV"}
+        UVIS channel inferred from the first product ID.
+    prime : str
+        Prime instrument tag used in metadata/naming.
+    n_pics : int
+        Number of exposures (time samples).
+    n_pixels : int
+        Number of spatial pixels.
+    n_wl : int
+        Number of spectral pixels.
+
+    slit : str
+        Slit state (from first product). Can be "OCCULTATION", "LOW_RESOLUTION", or "HIGH_RESOLUTION".
+    slit_width : float
+        Slit width [µm].
+    slit_dlambda : float
+        Slit width image on the spectral dimension detector [Å].
+        Defines the point spread function (PSF).
+    
+    WL : numpy.ndarray
+        Wavelength grid for the detector [Å]. Shape: (n_wl,).
+
+    counts : numpy.ndarray
+        Raw detector counts. Shape: (n_pics, n_pixels, n_wl).
+    cps : numpy.ndarray
+        Counts per second (counts / expo_time). Same shape as :attr:`counts`.
+    cps_bg_removed : numpy.ndarray
+        Background-corrected counts per second. Same shape as :attr:`counts`.
+
+    data : numpy.ndarray
+        Calibrated radiance array [kR]. Same shape as :attr:`counts`). Populated by :meth:`calibrate()`.
+    uncertainty_sup : numpy.ndarray or None
+        Upper radiance uncertainty array. Populated by :meth:`calibrate()` / :meth:`get_radiance_uncertainty()`.
+    uncertainty_inf : numpy.ndarray or None
+        Lower radiance uncertainty array. Populated by :meth:`calibrate()` / :meth:`get_radiance_uncertainty()`.
+
+    calibration : numpy.ndarray
+        Calibration multiplier per exposure [kR/counts]. Same shape as :attr:`counts`.
+    calibration_error : numpy.ndarray
+        Calibration uncertainty array.
+    geometry : list[Geometry] or None
+        Per-exposure :class:`Geometry` objects. Populated by :meth:`set_geometry()`.
+    pixel_LOS : numpy.ndarray or None
+        Structured array of line-of-sight geometry per pixel and exposure.
+        Fields: ``"lon"`` [°], ``"lat"`` [°], ``"alt"`` [km],
+        ``"sza"`` [°], ``"phase"`` [°], ``"ems"`` [°], ``"lt"`` [h].
+        Shape: (n_pics, n_pixels, 5) for each field.
+        The last dimension corresponds to the pixel center,
+        bottom-left, bottom-right, upper-right, and upper-left corners, respectively.
+    HD : float or None
+        Mean heliocentric distance during the observation. Populated by :meth:`set_geometry()`.
+
+    pixel_stars_mask : numpy.ndarray
+        Boolean mask of star-contaminated pixels (shape: (n_pics, n_pixels)).
+    pixel_corrupted : numpy.ndarray
+        Boolean mask of pixels showing partial data (shape: (n_pics, n_pixels)).
+    evil_pixels : numpy.ndarray
+        Boolean mask of known bad pixels on the detector. Shape: (64, 1024).
+    evil_pixels_binned : numpy.ndarray
+        Boolean mask of known bad pixels after binning. Shape: (n_pixels, n_wl).
+
+    background_level : float
+        Background level in counts/s per spectral pixel (before binning factors).
+    background_error : float
+        Uncertainty on `background_level`.
+
+    ET_start : numpy.ndarray
+        Ephemeris times at each exposure start (seconds past J2000).
+    ET_middle : numpy.ndarray
+        Ephemeris times at each exposure mid-point.
+    ET_stop : numpy.ndarray
+        Ephemeris times at each exposure end.
+    UTC_start : list[str]
+        UTC strings for exposure start times.
+    UTC_middle : list[str]
+        UTC strings for exposure mid-point times.
+    UTC_stop : list[str]
+        UTC strings for exposure end times.
+    time_exposition: numpy.ndarray
+        Array of times during the each exposure (s).
+        Shape : (n_pics, PicsPerExposure).
+        PicsPerExposure is defined in the pipeline defaults file. Default is 60.
+        Useful for getting geometric information at finer time resolution than the exposure cadence.
+
+    is_calibrated : bool
+        True if `data` has been populated by `calibrate()`.
+    calibration_set : bool
+        True if per-exposure calibration arrays are set.
+    is_bkg_removed : bool
+        True if background correction has been applied to `cps_bg_removed`.
+    is_smoothed : bool
+        True if smoothing has been applied to calibrated spectra.
+
+    instrument : Instrument
+        Cassini/UVIS :class:`Instrument` object providing instrument properties
+        and SPICE instrument kernel management.
+    pds_data : list of PDSRawData
+        List of loaded PDS products forming the observation.
+
+
+    Notes
+    -----
+    - All PDS products are saved into :attr:`self.pds_data` as :class:`PDSRawData` objects.
+    - Geometry is not computed during initialization. Call :meth:`set_geometry()` to populate
+      :attr:`self.geometry` and :attr:`self.pixel_LOS`.
+    - This initializer loads and unloads SPICE kernels (LSK, and IK indirectly via Instrument). Ensure
+      the kernel paths are correctly configured in your environment configuration.
+
+    See Also
+    --------
+    :meth:`set_geometry` : Compute SPICE-based geometry for each exposure.
+    :meth:`set_background` : Estimate and/or set detector background level.
+    :meth:`calibrate` : Apply radiometric calibration and populate calibrated arrays.
+    :meth:`bin_pixels` : Bin pixels geometrically or manually into a :class:`UVIS_Bin` container.
+
+    References
+    ----------
+    [1] Le Guennic et al. (2026)
     """
 
     def __init__(
@@ -858,66 +1103,53 @@ class UVIS_Observation:
             batch: str | Path | None = None,
             prime_instrument: Literal["PRIME", "UVIS", "CIRS", "VIMS", "ISS"] = 'PRIME',
             ID: int = 0,
-            target: str = 'Titan',
+            target: str = None,
             name: str | None = None,
             sort: bool = True,
     ):
         """
         Build an observation from UVIS PDS files.
-
-        Parameters
-        ----------
-        *files : str | Path | iterable
-            One or more base paths (with or without extension).
-        batch : str | Path, optional
-            Text file listing base paths (one per line). If provided, it overrides *files.
-        prime_instrument : {"PRIME","UVIS","CIRS","VIMS","ISS"}, optional
-            Prime instrument tag used in naming/metadata.
-        ID : int, optional
-            Extra identifier appended to the observation name when > 0.
-        target : str, optional
-            Target name (stored uppercased).
-        name : str, optional
-            If provided, overrides the auto-generated name.
-        sort : bool, optional
-            If True (default), sort files and exposures by spacecraft clock start time.
-        Notes
-        -----
-        - This initializer reads all PDS products into `self.pds_data`, concatenates
-        `raw_data` along the time axis, and builds per-exposure time arrays (ET/UTC).
-        - Geometry is not computed here; call `set_geometry()`.
         """
         
         # READING DATA
         #________________________
         if batch is not None :
-            batch_path = Path(batch)
-            batch_dir  = batch_path.parent
-            with batch_path.open('r') as f :
-                files = [line.strip() for line in f if line.strip()]
+            # Read batch .txt file of PDS files
+            batch = Path(batch)
+            with batch.open('r') as f :
+                files = [Path(line.strip()) for line in f if line.strip()]
 
-            # For each line, if the path is relative, join with batch_dir and remove extension.
-            files = [str((batch_dir / line).with_suffix('')) if not Path(line).is_absolute() else str(Path(line).with_suffix('')) for line in files]
+            if batch.is_absolute():
+                batch_parent = batch.parent
+                files = [f if f.is_absolute() else batch_parent / f for f in files]
+
 
         else :
-            # Read batch of PDS files
-            if len(files) == 1 and hasattr(files[0], '__iter__') and not isinstance(files[0], (str, bytes)):
+            if len(files) == 1 and hasattr(files[0], '__iter__') and not isinstance(files[0], (str, bytes, Path)):
                 files = files[0]
+        files = [Path(f) for f in files]
 
-            files = [str(Path(f).with_suffix('')) for f in files]
-            files = list(dict.fromkeys(files))
+        if ( # Only one pair of .LBL/.DAT files provided
+            len(files) == 2
+            and {files[0].suffix.upper(), files[1].suffix.upper()} == {".LBL", ".DAT"}
+        ):
+            self.pds_data  = [PDSRawData(files[0], files[1])]
+            self.raw_files = [str(files[0]), str(files[1])]
+        else:
+            files = [str(f.with_suffix('')) for f in files]
+            files = list(dict.fromkeys(files)) # Remove duplicates while preserving order
 
-        if sort :
-            # Sort files by spacecraft clock start time
-            files_with_sctime = []
-            for f in files :
-                pds = pds_raw_data(f)
-                sctime = float(pds.label.SPACECRAFT_CLOCK_START_COUNT.split('/')[-1])
-                files_with_sctime.append( (f, sctime) )
-            files_with_sctime.sort(key=lambda x: x[1])
-            files = [f[0] for f in files_with_sctime]
-        self.pds_data  = [pds_raw_data(f)    for f in files] # Generate pds_raw_data structure for each file in the batch
-        self.raw_files = [  str(f)           for f in files]
+            if sort :
+                # Sort files by spacecraft clock start time
+                files_with_sctime = []
+                for f in files :
+                    pds    = PDSRawData(f)
+                    sctime = float(pds.label.SPACECRAFT_CLOCK_START_COUNT.split('/')[-1])
+                    files_with_sctime.append( (f, sctime) )
+                files_with_sctime.sort(key=lambda x: x[1])
+                files = [f[0] for f in files_with_sctime]
+            self.pds_data  = [PDSRawData(f) for f in files]
+            self.raw_files = [str(f)        for f in files]
         #________________________
 
 
@@ -953,7 +1185,7 @@ class UVIS_Observation:
 
         # Date
         self.YEAR     = int(nameid[3:7])
-        self.DOY      = int(nameid[8:11])           # Day of year at the begining of observation
+        self.DOY      = int(nameid[8:11])           # Day of year at the beginning of observation
         self.prime    = prime_instrument            # UVIS (PRIME), CIRS, VIMS or ISS
         if prime_instrument=='UVIS' : self.prime='PRIME'
         self.is_prime = prime_instrument=='PRIME'
@@ -971,11 +1203,13 @@ class UVIS_Observation:
         self.spec_start = self.pds_data[0].qube.UL_CORNER_BAND
         self.spec_stop  = self.pds_data[0].qube.LR_CORNER_BAND
 
+        # Channel and slit
         self.channel      = 'FUV' if 'FUV' in nameid else 'EUV'
         self.pix_bandpass = pixel_bandpasses[self.channel]
         self.slit         = self.pds_data[0].label.SLIT_STATE
-        self.slit_ratio   = slit_ratios[self.channel][self.slit]
-        self.slit_width   = slit_dlambda[self.channel][self.slit]
+        self.slit_ratio   = slit_ratios [self.channel][self.slit]
+        self.slit_width   = slit_width  [self.channel][self.slit]
+        self.slit_dlambda = slit_dlambda[self.channel][self.slit]
 
         self.evil_pixels        = None  # Mask: True when evil pixel
         self.evil_pixels_binned = None
@@ -983,6 +1217,7 @@ class UVIS_Observation:
         
 
         # Name
+        self.ID = ID
         if ID>0 : self.IDstr = '_'+str(ID) # Identifier for multiple observation during one DOY
         else    : self.IDstr = ''
 
@@ -1027,8 +1262,8 @@ class UVIS_Observation:
         # Observation
         self.target = target.upper()
 
-        self.background_level = 0.
-        self.background_error = 0.
+        self.background_level = None
+        self.background_error = None
         self.n_bg_pixels = None
         self.max_gap = None
 
@@ -1074,7 +1309,6 @@ class UVIS_Observation:
         # Sub-exposure times
         self.times_exposition = np.array([np.linspace(self.ET_start[i], self.ET_stop[i], PicsPerExposure, endpoint=True) for i in range(self.n_pics)])
 
-        self.__dict__['_init_done'] = True
 
     def integrate_radiance(self, wl_range: tuple[float, float] = (1600,1900), method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') :
         """
@@ -1183,7 +1417,6 @@ class UVIS_Observation:
         """
 
         if self.channel!='FUV' :
-            print('Smoothing is only available for FUV channel')
             return
         if self.is_smoothed and not force :
             print('Spectral data is already smoothed')
@@ -1210,9 +1443,11 @@ class UVIS_Observation:
         interp : {'linear', 'pchip'}, optional
             Interpolation method used to map the lab calibration to the full detector range.
             Options are:
+
             - 'linear' : Linear interpolation.
             - 'pchip'  : Piecewise Cubic Hermite Interpolating Polynomial.
-            Default is 'linear'.
+
+            Default is 'pchip'.
         flat_field : bool, optional
             If True, apply flat-field correction (including its time variation). If False,
             the flat-field is effectively disabled.
@@ -1222,6 +1457,7 @@ class UVIS_Observation:
         -------
         dict[str, np.ndarray]
             A dictionary containing:
+
             - 'calibration'       : numpy.ndarray
                 The calibration multiplier, binned and shaped to match the raw data dimensions.
             - 'calibration_error' : numpy.ndarray
@@ -1229,11 +1465,14 @@ class UVIS_Observation:
 
         Notes
         -----
+
         - The method incorporates several calibration steps:
+
             - Laboratory calibration data is adjusted for slit width.
             - Time variation is accounted for using spacecraft time.
             - Flat-field corrections are applied if `flat_field` is `True`.
             - Binning is performed according to the spatial and spectral binning factors.
+
         - For the FUV channel, pixels known as 'evil' pixels with anomalous behavior are handled,
           and corresponding elements in the arrays are set to NaN.
         """
@@ -1715,12 +1954,12 @@ class UVIS_Observation:
 
 
         # ADD GEOMETRY INFO
-        if self.geometry is not None :
+        if self.pixel_LOS is not None :
             
             # DISK
             mask_ij = np.all(self.pixel_LOS['alt'] < 0, axis=2)
             for xuv, yuv in np.argwhere(mask_ij):
-                ax.plot([xuv], [yuv], color="#000000", ls='', marker='o', markersize=4)
+                ax.plot([xuv], [yuv], color="#000000", ls='', marker='o', markersize=2)
             
             if np.any(self.pixel_star_geometry[:]['number']>0) :
                 index  = np.where((self.pixel_star_geometry[:]['number']>0)*(~self.pixel_star_geometry[:]['is_UV']))
@@ -1808,7 +2047,7 @@ class UVIS_Observation:
                     pixel_value = integrated_radiance[col, row]
 
                     # Construire la chaîne de texte à afficher
-                    if self.geometry is None:
+                    if self.pixel_LOS is None:
                         text = (
                             f"Pixel: {row},  Exposure: {col}\n"
                             f"Signal: {pixel_value:.2f} kR"
@@ -1844,6 +2083,35 @@ class UVIS_Observation:
         fig.canvas.mpl_connect('button_press_event', on_click)
         update_text()
         plt.show()
+    
+    def save_stars(self, filepath: str | Path) -> str:
+        """
+        Save the list of stellar-contaminated pixels to a text file.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Output path for the star pixel list.
+
+        Returns
+        -------
+        str or Path
+            The original `filepath` argument.
+        """
+
+        p = Path(filepath)
+
+        print(f"Saving UVIS observation star pixel list {p.stem}...", end='', flush=True)
+
+        with p.open('w') as f:
+            f.write("# exposure | pixel\n")
+            for (i, j) in self.pixel_stars:
+                f.write(f"  {i:<2}         {j:<2}\n")
+        
+        print(' Done')
+
+        return filepath
+    
         
 
     # -------- BACKGROUND NOISE
@@ -1892,7 +2160,7 @@ class UVIS_Observation:
         if not (self.WL[0]<wl_range[0]<self.WL[-1] and self.WL[0]<wl_range[1]<self.WL[-1]) :
             raise ValueError(f'Please select a wl_range within the {self.channel} channel.')
 
-        if self.geometry is None:
+        if self.pixel_LOS is None:
             raise ValueError("The observation geometry must be initialized before determining the background.")
 
         
@@ -1917,7 +2185,7 @@ class UVIS_Observation:
         counts_per_pixel = np.sum(bg_pixels, axis=1)
 
 
-        #         total number of counts      / # of spectral pixels                   / exposition time
+        #         total number of counts      / # of spectral pixels                                 / exposition time
         cps     = np.mean(counts_per_pixel)  /  (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)   /  self.expo_time
         cps_err = np.std(counts_per_pixel)  /   (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)  /   self.expo_time
 
@@ -2095,10 +2363,9 @@ class UVIS_Observation:
             Manual pixel selection. If None, automatic geometric binning is used.
 
             Accepted formats are:
-            - ``[(i, j), (i, j), ...]`` :
-            a single bin containing all listed pixels.
-            - ``[[(i, j), ...], [(i, j), ...], ...]`` :
-            multiple bins, each defined by its own list of pixels.
+
+            - ``[(i, j), (i, j), ...]`` : a single bin containing all listed pixels.
+            - ``[[(i, j), ...], [(i, j), ...], ...]`` : multiple bins, each defined by its own list of pixels.
 
             Indices are interpreted as ``(exposure_index, pixel_index)``.
 
@@ -2107,6 +2374,7 @@ class UVIS_Observation:
             to a field in ``pixel_LOS``.
 
             Accepted values are:
+
             - ``'lon'``   : longitude of the tangent point of the line of sight
             - ``'lat'``   : latitude
             - ``'alt'``   : altitude
@@ -2121,6 +2389,7 @@ class UVIS_Observation:
 
         mode : {'center', 'all'}, optional
             Selection mode for geometric binning:
+
             - ``'center'`` : use the central LOS value of each pixel.
             - ``'all'``    : require all LOS samples of the pixel to fall within
                             the bin boundaries.
@@ -2268,7 +2537,88 @@ class UVIS_Observation:
         
 
     # -------- SAVE MANAGMENT
-    def save(self, filepath: str = None, overwrite: bool = False, fullsave=True):
+
+    def save_npz_plain(self, filepath, overwrite=False, compress=True):
+        """
+        Save selected attributes of obj into a .npz file.
+        Stores:
+        - numpy arrays as-is
+        - scalars/strings as 0-D numpy arrays
+        - lists/tuples as numpy arrays (must not become dtype=object)
+        """
+
+        def _convert(v):
+            if isinstance(v, np.ndarray):
+                return v
+            elif isinstance(v, Path):
+                return np.array(str(v))
+            elif isinstance(v, np.generic):
+                return np.array(v.item())
+            elif isinstance(v, (str, int, float, bool)) or v is None:
+                return np.array(v)
+            elif isinstance(v, (list, tuple)):
+                arr = np.array(v)
+                if arr.dtype == object:
+                    raise TypeError(
+                        "Attribute becomes dtype=object (not safe without pickle). "
+                    )
+                return arr
+            else:
+                raise TypeError(
+                    f"Attribute has unsupported type {type(v)} for plain npz. "
+                )
+            
+
+        keys = []
+
+        # Scalars
+        for name, value in vars(self).items():
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                keys.append(name)
+            elif isinstance(value, np.generic):  # numpy scalar types (np.int64, np.float32, ...)
+                keys.append(name)
+
+        # Arrays
+        keys.extend([
+            'counts', 'raw_files',
+            'ET_start', 'ET_middle', 'ET_stop', 'UTC_start', 'UTC_middle', 'UTC_stop',
+            'WL', 'sctime_sec_start', 'pixel_stars', 'pixel_corrupted', 'pixel_stars_mask',
+            'evil_pixels', 'evil_pixels_binned'
+            ])
+
+
+        payload = {}
+
+        for k in keys:
+            v = getattr(self, k)
+            payload[k] = _convert(v)
+            
+        for k in vars(self.instrument).keys():
+            if k.startswith('_'):
+                continue
+            v = getattr(self.instrument, k)
+            key_name = f'inst_{k}'
+            payload[key_name] = _convert(v)
+
+
+        # Save
+        p = Path(filepath)
+        if p.suffix.lower() != ".uvis":
+            p = p.with_suffix(".uvis")
+
+        if p.exists() and not overwrite:
+            raise FileExistsError(f"File already exists: {p}")
+
+        if compress:
+            np.savez_compressed(p, **payload)
+        else:
+            np.savez(p, **payload)
+
+        return str(p)
+    
+
+
+    def save(self, filepath: str = None, overwrite: bool = False, fullsave=False):
         """
         Saves the current UVIS_Observation instance to a pickle (.pkl) file.
         The object is save without self.geometry attribute unless keyword fullsave
@@ -2298,10 +2648,11 @@ class UVIS_Observation:
         OSError
             For other I/O-related errors.
         """
-        
-        if not fullsave :
+        flag_fullsave = False
+        if not fullsave and hasattr(self, 'geometry') :
             tmp = self.geometry
             del self.geometry
+            flag_fullsave = True
 
 
         if filepath is None: filepath = f"{self.name}.uvis"
@@ -2324,7 +2675,7 @@ class UVIS_Observation:
         
         print(' Done')
 
-        if not fullsave: self.geometry = tmp
+        if flag_fullsave: self.__setattr__('geometry', tmp)
         return filepath
 
 
@@ -2434,13 +2785,3 @@ class UVIS_Observation:
 
         return data
     
-    def __setattr__(self, key, value):
-        # Si l'initialisation est terminée et que l'attribut n'existe pas déjà, on lève une erreur
-        if self.__dict__.get('_init_done', False) and not hasattr(self, key):
-            raise AttributeError(f"UVIS_Observation has no attribute '{key}'")
-        # Sinon, on affecte normalement
-        object.__setattr__(self, key, value)
-
-    def add_attribute(self, key, value):
-        """Ajoute un nouvel attribut même après l'initialisation."""
-        object.__setattr__(self, key, value)
