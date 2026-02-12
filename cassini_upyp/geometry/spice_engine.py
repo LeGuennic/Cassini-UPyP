@@ -44,7 +44,7 @@ class Geometer:
         self.target_distance = np.linalg.norm(self.planet_from_obs_j2k)
 
         # Zorder for plotting
-        self.zorder = -round(self.target_distance/1000)
+        self.zorder = -round(self.target_distance)
 
         self.rotation_IAU_J2K = spice.pxform('IAU_' + self.planet, 'J2000', self.et)
         self.rotation_J2K_IAU = spice.pxform('J2000', 'IAU_' + self.planet, self.et)
@@ -126,7 +126,7 @@ class Geometer:
     
     def get_lon_line(self, lon, latgrid = None) :
         if latgrid is None:
-            latgrid = np.linspace(-np.pi, np.pi, 37)
+            latgrid = np.linspace(-np.pi/2, np.pi/2, 37)
         
 
         vec    = ellipsoid_coords(self.radii, lon, latgrid)

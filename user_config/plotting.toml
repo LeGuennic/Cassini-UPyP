@@ -34,7 +34,6 @@ color = "grey"
 ls = ""
 marker = "+"
 markersize = 2
-zorder = -100001
 
 # Stars style
 [STAR_STYLE]
@@ -42,15 +41,6 @@ color = "white"
 linestyle = ""
 marker = "."
 markersize = 1
-zorder = -100000
-
-# UVIS star style
-[UV_STAR_STYLE]
-color = "purple"
-linestyle = ""
-marker = "."
-markersize = 1
-zorder = -99999
 
 # Planet style (per target)
 [PLANET_STYLE.DEFAULT]

@@ -19,7 +19,6 @@ import warnings
 from scipy.interpolate import PchipInterpolator
 
 # MODULES
-from .background import bg_fit, do_bg_fit
 from .uvisutils import (
     # Calibration
     uvis_lab_calibration,
@@ -1362,7 +1361,9 @@ class UVIS_Observation:
 
         counts_position = self.counts>0
 
-        if self.background_level == 0:
+        if self.background_level is None:
+            bg_radiance_err = 0
+        elif self.background_level == 0:
             bg_radiance_err = 0
         else:
             bg_radiance_err = self.background_level * self.calibration * np.sqrt(
@@ -1727,7 +1728,7 @@ class UVIS_Observation:
             self.pixel_star_geometry, dtype=dtype
             ).reshape(self.n_pics, n_pixels)
         
-    def plot_all_geometry(self, folder: str | Path, out_format: Literal["png","gif"] = 'png', duration: float = 1/60):
+    def plot_all_geometry(self, folder: str | Path, out_format: Literal["png","gif"] = 'png', duration: float = 1/60, **kwargs) :
         """
         Plot geometry for all exposures and save the results.
 
@@ -1755,7 +1756,7 @@ class UVIS_Observation:
             frames = []
             for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry animation"):
                 buf = io.BytesIO()
-                obj.plot(save=True, savename=buf)
+                obj.plot(save=True, savename=buf, **kwargs)
                 buf.seek(0)
 
                 im = Image.open(buf).convert("RGBA")
@@ -1777,7 +1778,7 @@ class UVIS_Observation:
             # Standard case: save each plot as an individual file
             for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry plots"):
                 filename = folder / f"geometry_{i}.{out_format}"
-                obj.plot(save=True, savename=str(filename), show=False)
+                obj.plot(save=True, savename=str(filename), show=False, **kwargs)
             
             plt.close('all')
 
@@ -1889,7 +1890,8 @@ class UVIS_Observation:
             cmap: str = 'gist_ncar',
             color_scale: tuple[float, float] = (0,14),
             wl_range: tuple[float, float]    = (1600,1900),
-            method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid'
+            method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid',
+            exp_range: tuple[int, int] = None
         ):
         """
         Create a heatmap of integrated radiance and highlight pixels affected by stars.
@@ -1905,6 +1907,8 @@ class UVIS_Observation:
             Wavelength range for integration. Default is (1600, 1900) in angströms.
         method : {'simpson', 'trapz', 'trapezoid'}, optional
             Integration method to use. Default is 'simpson'.
+        exp_range : tuple of int, optional
+            Range of exposures to display (start, end). If None, all exposures are shown.
 
         Notes
         -----
@@ -1916,8 +1920,20 @@ class UVIS_Observation:
         from matplotlib import pyplot as plt
 
         integrated_radiance = self.integrate_radiance(wl_range=wl_range, method=method)
+        if exp_range is None:
+            exp0, exp1 = 0, self.n_pics
+        else:
+            exp0, exp1 = exp_range
+            exp0 = 0 if exp0 is None else int(exp0)
+            exp1 = self.n_pics if exp1 is None else int(exp1)
+            exp0 = max(0, min(self.n_pics, exp0))
+            exp1 = max(0, min(self.n_pics, exp1))
+            if exp1 <= exp0:
+                raise ValueError(f"Invalid exp_range={exp_range}. Expected (start, end) with 0 <= start < end <= {self.n_pics}.")
 
-        X,Y = np.arange(self.n_pics+1)-0.5, np.arange(self.n_pixels+1)-0.5
+        n_exp = exp1 - exp0
+        integrated_radiance = integrated_radiance[exp0:exp1, :]
+        X, Y = np.arange(n_exp + 1) - 0.5, np.arange(self.n_pixels + 1) - 0.5
 
         fig     = plt.figure(figsize=(8, 6))
         ax      = fig.add_axes([0.1, 0.1, 0.6, 0.8])
@@ -1937,14 +1953,15 @@ class UVIS_Observation:
         cbar.set_label("Integrated radiance (kR)", rotation=270, labelpad=15)
 
         # Ticks definition
-        if self.n_pics < 10 :
-            xticks = np.arange(self.n_pics)
-        else :
-            xticks = np.arange(self.n_pics, step=2)
+        if n_exp < 10:
+            xticks = np.arange(n_exp)
+        else:
+            xticks = np.arange(0, n_exp, step=2)
         
         yticks = np.arange(self.n_pixels)
 
         ax.set_xticks(xticks)
+        ax.set_xticklabels(xticks + exp0)
         ax.set_yticks(yticks)
         ax.set_aspect('equal')
         ax.set_xlabel("Exposure Number")
@@ -1957,12 +1974,12 @@ class UVIS_Observation:
         if self.pixel_LOS is not None :
             
             # DISK
-            mask_ij = np.all(self.pixel_LOS['alt'] < 0, axis=2)
+            mask_ij = np.all(self.pixel_LOS[exp0:exp1, :]['alt'] < 0, axis=2)
             for xuv, yuv in np.argwhere(mask_ij):
                 ax.plot([xuv], [yuv], color="#000000", ls='', marker='o', markersize=2)
             
-            if np.any(self.pixel_star_geometry[:]['number']>0) :
-                index  = np.where((self.pixel_star_geometry[:]['number']>0)*(~self.pixel_star_geometry[:]['is_UV']))
+            if np.any(self.pixel_star_geometry[exp0:exp1, :]['number']>0) :
+                index  = np.where((self.pixel_star_geometry[exp0:exp1, :]['number']>0)*(~self.pixel_star_geometry[exp0:exp1, :]['is_UV']))
                 result = list(zip(index[0], index[1]))
 
                 for xuv,yuv in result :
@@ -1973,7 +1990,10 @@ class UVIS_Observation:
         
         # INTERACTION HANDLES
         for (row, col) in self.pixel_stars:
-            x_center = (X[col] + X[col+1]) / 2
+            if not (exp0 <= col < exp1):
+                continue
+            col_local = col - exp0
+            x_center = (X[col_local] + X[col_local+1]) / 2
             y_center = (Y[row] + Y[row+1]) / 2
             line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
             self.markers[(row, col)] = line
@@ -1993,7 +2013,10 @@ class UVIS_Observation:
             plt.draw()
 
         def add_marker(row, col):
-            x_center = (X[col] + X[col+1]) / 2
+            if not (exp0 <= col < exp1):
+                return
+            col_local = col - exp0
+            x_center = (X[col_local] + X[col_local+1]) / 2
             y_center = (Y[row] + Y[row+1]) / 2
             line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
             self.markers[(row, col)] = line
@@ -2008,8 +2031,11 @@ class UVIS_Observation:
                 x_click = event.xdata
                 y_click = event.ydata
 
-                col = np.searchsorted(X, x_click) - 1
+                col_local = np.searchsorted(X, x_click) - 1
                 row = np.searchsorted(Y, y_click) - 1
+                if not (0 <= row < self.n_pixels and 0 <= col_local < n_exp):
+                    return
+                col = col_local + exp0
 
                 if (row, col) in self.pixel_stars:
                     self.pixel_stars.remove((row, col))
@@ -2038,13 +2064,14 @@ class UVIS_Observation:
                 y_hover = event.ydata
 
                 # Trouver l’indice du pixel survolé
-                col = np.searchsorted(X, x_hover) - 1
+                col_local = np.searchsorted(X, x_hover) - 1
                 row = np.searchsorted(Y, y_hover) - 1
 
                 # Vérifier qu’on est bien dans la grille
-                if 0 <= row < self.n_pixels and 0 <= col < self.n_pics:
+                if 0 <= row < self.n_pixels and 0 <= col_local < n_exp:
+                    col = col_local + exp0
                     # Exemple: récupérer la valeur du signal
-                    pixel_value = integrated_radiance[col, row]
+                    pixel_value = integrated_radiance[col_local, row]
 
                     # Construire la chaîne de texte à afficher
                     if self.pixel_LOS is None:
@@ -2064,7 +2091,7 @@ class UVIS_Observation:
                         )
 
                     # Mise à jour de l’annotation
-                    hover_annotation.xy = (col, row)
+                    hover_annotation.xy = (col_local, row)
                     hover_annotation.set_text(text)
                     hover_annotation.set_visible(True)
                     # Redessiner la figure
@@ -2117,11 +2144,9 @@ class UVIS_Observation:
     # -------- BACKGROUND NOISE
     def get_background(
             self,
+            alt_limit: float,
             mode: Literal['average', 'simulate'] = 'simulate',
-            alt_limit: float = 2000,
-            wl_range: tuple[float, float] = (1600,1900),
-            n_fits: int = 20,
-            parallel: bool = True
+            wl_range: tuple[float, float] = (1400,1850),
         ) -> tuple[float, float]:
         """
         Compute the background noise level and its uncertainty from the raw detector counts.
@@ -2135,12 +2160,10 @@ class UVIS_Observation:
         ----------
         mode : {'average', 'simulate'}, optional
             The method to compute the background. Default is 'simulate'.
-        alt_limit : int, optional
-            Minimum altitude limit to consider a pixel as background. Default is 2000.
+        alt_limit : float
+            Minimum altitude limit to consider a pixel as background.
         wl_range : tuple of int, optional
             Wavelength range (min, max) to consider for background calculation. Default is (1600, 1900).
-        n_fits : int, optional
-            Number of fits to perform in simulation mode. Default is 20.
         parallel : bool, optional
             Whether to perform the simulation in parallel processing. Default is True.
 
@@ -2155,7 +2178,7 @@ class UVIS_Observation:
             If the specified wavelength range is outside the detector range or if geometry is not initialized.
         """
 
-        from .background import histogram, gaps, max_gap
+        from .background import histogram, gaps, max_gap, bg_fit
 
         if not (self.WL[0]<wl_range[0]<self.WL[-1] and self.WL[0]<wl_range[1]<self.WL[-1]) :
             raise ValueError(f'Please select a wl_range within the {self.channel} channel.')
@@ -2165,29 +2188,28 @@ class UVIS_Observation:
 
         
         MinPixAlt = np.min(self.pixel_LOS['alt'], axis=2)
+        self.n_bg_pixels = np.sum(MinPixAlt>alt_limit)
 
-        loop = True
-        while loop :
-            if not np.any(MinPixAlt>alt_limit) :
-                if   alt_limit>2000 : alt_limit = 2000
-                elif alt_limit>1500 : alt_limit = 1500
-                else :
-                    print('No background pixels, please manually set a background level.')
-                    return np.nan, np.nan
-            else : loop=False
+        if self.n_bg_pixels==0 :
+            print(f'No background pixels available above {alt_limit} km, please manually set a background level.')
+            return np.nan, np.nan
+
 
 
         # Basic averaging method
-        self.n_bg_pixels = np.sum(MinPixAlt>alt_limit)
         bg_pixels = self.counts[(MinPixAlt>alt_limit) * ~self.pixel_corrupted * ~self.pixel_stars_mask, :]
         bg_pixels = bg_pixels[:, (self.WL>=wl_range[0]) * (self.WL<=wl_range[1])]
         bg_pixels = bg_pixels[np.any(bg_pixels, axis=1)] # Filter total transmission losses
         counts_per_pixel = np.sum(bg_pixels, axis=1)
 
 
-        #         total number of counts      / # of spectral pixels                                 / exposition time
-        cps     = np.mean(counts_per_pixel)  /  (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)   /  self.expo_time
-        cps_err = np.std(counts_per_pixel)  /   (bg_pixels.shape[1] *self.spat_bin*self.spec_bin)  /   self.expo_time
+        S = bg_pixels.shape[0]                                       # N samples
+        L = np.sum((self.WL>=wl_range[0]) * (self.WL<=wl_range[1]))  # N spectral pixels
+        
+        #         total number of counts      / # of spectral pixels                    / exposure time
+        cps     = np.mean(counts_per_pixel)  /  (L   * self.spat_bin*self.spec_bin)    /  self.expo_time
+        N_tot   = np.sum(counts_per_pixel)
+        cps_err = np.sqrt(N_tot)           /    (L*S * self.spat_bin*self.spec_bin)  /    self.expo_time
 
         wl_index = (
             np.where(self.WL>=wl_range[0])[0][ 0],
@@ -2195,8 +2217,7 @@ class UVIS_Observation:
         )
 
         # Flag corrupted pixels (transmission losses)
-        self.max_gap = max_gap(cps, self.expo_time,
-                               SPATIAL_BIN=self.spat_bin, SPE_UL=self.spec_start, SPE_LR=self.spec_stop, BIN=self.spec_bin)
+        self.max_gap = max_gap(cps, self.expo_time, n_wl = self.n_wl, SPECTRAL_BIN=self.spec_bin, SPATIAL_BIN = self.spat_bin)
         if self.max_gap <10 and self.spat_bin>1 : self.max_gap = 100
         for i_pic in range(self.counts.shape[0]) :
             for i_spat in range(self.counts.shape[1]) :
@@ -2206,11 +2227,13 @@ class UVIS_Observation:
                     self.pixel_corrupted[i_pic,i_spat] = True
 
                 # Lyman-alpha losses
-                if not np.any(self.counts[i_pic,i_spat, 122//self.spec_bin:137//self.spec_bin]) :
-                    self.pixel_corrupted[i_pic,i_spat] = True
+                if self.channel=='FUV':
+                    if not np.any(self.counts[i_pic,i_spat, 122//self.spec_bin:137//self.spec_bin]) :
+                        self.pixel_corrupted[i_pic,i_spat] = True
 
-                # Simulate maximum gap on detector
-                if max(gaps(self.counts[i_pic,i_spat, :])) > self.max_gap :
+                # Maximum gap on detector
+                obs_gaps = gaps(self.counts[i_pic,i_spat, :])
+                if obs_gaps is not None and max(obs_gaps) > self.max_gap :
                     self.pixel_corrupted[i_pic,i_spat] = True
                 
 
@@ -2220,75 +2243,33 @@ class UVIS_Observation:
 
 
         if mode=='simulate' :
-
             bg_pixels = self.counts[(MinPixAlt>alt_limit) * ~self.pixel_corrupted * ~self.pixel_stars_mask, :]
             bg_pixels = bg_pixels[:, (self.WL>=wl_range[0]) * (self.WL<=wl_range[1])]
 
+            S = bg_pixels.shape[0]                                       # N samples
+            L = np.sum((self.WL>=wl_range[0]) * (self.WL<=wl_range[1]))  # N spectral pixels
 
             # Build observations histogram
-            H = np.zeros(bg_pixels.shape[1]+1)
+            H = np.zeros(L+1)
             for pixel in bg_pixels :
                 H += histogram(
-                    gaps(pixel), max_value=bg_pixels.shape[1]
+                    gaps(pixel), max_value=L
                     )
-            H /= bg_pixels.shape[0]
+            H /= S
 
-            
+            # Perform fits
+            N = bg_fit(H, detector_shape=L)
 
-            # Perform simulation and fits
-            if parallel :
-                print('Retrieving background...', end='')
-                from multiprocessing import Pool, cpu_count
+            cps = N / (L * self.spec_bin * self.spat_bin * self.expo_time)
 
-
-
-                tasks = [
-                    (
-                        i_fit,
-                        H,
-                        bg_pixels.shape[0],
-                        1024,
-                        self.expo_time,
-                        self.spec_start,
-                        self.spec_stop,
-                        self.spec_bin,
-                        self.spat_bin,
-                        wl_index
-                    )
-                    for i_fit in range(n_fits)
-                ]
-
-                with Pool(processes=cpu_count()) as pool:
-                    bg_fits = pool.starmap(do_bg_fit, tasks)
-                
-                print(" Done")
-
-            else :
-                bg_fits = []
-
-                sys.stdout.write(f"Performing background fits: 0%")
-                sys.stdout.flush()
-                    
-                
-                for i_fit in range(n_fits) :
-                    bg_fits.append(
-                        bg_fit(
-                        H, bg_pixels.shape[0], 1024, exposition=self.expo_time,
-                        SPE_UL=self.spec_start,    SPE_LR=self.spec_stop,
-                        SPECTRA_BIN=self.spec_bin, SPATIAL_BIN=self.spat_bin, wl_index=wl_index
-                        )
-                    )
-                    progress = 100*(i_fit+1)//n_fits
-                    sys.stdout.write(f"\rPerforming background fits: {progress}%")
-                    sys.stdout.flush()
-                print('')
-            
-
-            cps     = np.mean(bg_fits)
-            cps_err = np.std (bg_fits)
+            q = (1 - 1/L)**N            
+            sigma_q = np.sqrt(q*(1-q)/(L*S))
+            sigma_N = np.abs(1/(q*np.log(1-1/L))) * sigma_q
+            cps_err = sigma_N / (L * self.spec_bin * self.spat_bin * self.expo_time)
+        
             if cps > 1e-3 : 
                 warnings.warn(
-                    f"Background level is unusually high: {cps:.2e} counts/s. Probably due to a wrong fit in the simulation (local minimum), use 'average' mode instead.",
+                    f"Background level is unusually high: {cps:.2e} counts/s.",
                     RuntimeWarning
                 )
         return cps, cps_err

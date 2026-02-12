@@ -440,7 +440,7 @@ def get_cal_time_variation(channel: Literal["FUV", "EUV"], sctime: float) -> np.
 
     This function reads calibration trending data from the IDL 'uvis_calibration_trending_v01_data.sav' computed from
     IDL routine uvis_calibration_trending_v01.pro and computes the spectral modulation
-    (`specmod`) for the specified UVIS channel at a given spacecraft time (`sctime`).
+    for the specified UVIS channel at a given spacecraft time (`sctime`).
 
     The spectral modulation is interpolated linearly in time between
     the two closest calibration epochs.
@@ -497,7 +497,7 @@ def get_ff_time_variation(channel: Literal["FUV", "EUV"], sctime: float) -> np.n
     Retrieve the flat-field (FF) time variation array for a given UVIS channel and spacecraft time.
 
     This function loads flat-field modifier data files corresponding to different spacecraft times and computes the
-    flat-field modifier array (`arrmod`) for the specified channel at the given spacecraft time (`sctime`).
+    flat-field modifier array for the specified channel at the given spacecraft time (`sctime`).
     It interpolates between the two closest calibration times to compute the flat-field modifier array.
 
     Parameters
@@ -517,7 +517,7 @@ def get_ff_time_variation(channel: Literal["FUV", "EUV"], sctime: float) -> np.n
     - Files are searched with the pattern ``f"*{channel}*ff_modifier*.dat"`` 
       inside the calibration files directory.
     - Spacecraft times are extracted from the last 10 characters of the
-      file stem (before the extension) and interpreted as integers.
+      file name and interpreted as integers.
     - If `sctime` is earlier than the first available time, an array of
       ones is returned.
     - If `sctime` is later than the last available time, the modifier

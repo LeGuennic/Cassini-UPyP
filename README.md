@@ -156,9 +156,9 @@ example/
 
 If you are using this in your own research, you are encouraged to modify the code locally to match your scientific assumptions and workflow.
 
-This project is under active development; the API may evolve.
+Note that this project is under active development and may evolve with time.
 
 
-## Notice on AI
+## Notice on generative AI
 
 AI LLM (Large Language Model) tools were used during development to help draft and edit documentation (docstrings, README, commits, ...), to suggest refactoring and optimizations for parts of the codebase, and to improve spelling and style. All changes (including this paragraph) were reviewed, modified, corrected, adapted and integrated by the author, who remains responsible for the final content and implementation.

@@ -64,6 +64,7 @@ def plot(
     ax: "plt.Axes" | None = None,
     pixel_notes: Literal['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt"] | None = None,
     pixel_numbers: bool = True,
+    date:bool = False,
     dpi: float = 1900 / 5,
 ) -> "plt.Axes":
 
@@ -197,6 +198,8 @@ def plot(
     if ax_created:
         ax.set_xlim(xmin,xmax)
         ax.set_ylim(ymin,ymax)
+        if frame in ("RADEC", "ORF"):
+            ax.invert_xaxis()
     # ------------------------------------
 
 
@@ -210,7 +213,7 @@ def plot(
         g_obj.target_limb[frame][:,0],
         g_obj.target_limb[frame][:,1],
         **planet_style['limb'],
-        zorder=0
+        zorder=0+g_obj.zorder
     )
 
     if g_obj.target != 'SUN' :
@@ -219,7 +222,7 @@ def plot(
             g_obj.night_side[frame][:,0],
             g_obj.night_side[frame][:,1],
             **planet_style['night_side'],
-            zorder = 1
+            zorder = 1+g_obj.zorder
         )
 
         # Terminator line
@@ -227,7 +230,7 @@ def plot(
             g_obj.terminator[frame][:,0],
             g_obj.terminator[frame][:,1],
             **planet_style['terminator'],
-            zorder = 2
+            zorder = 2+g_obj.zorder
         )
     
     # Main target section
@@ -236,16 +239,16 @@ def plot(
         if frame=='ORF' :
             # RA / DEC background lines
             ax.plot(g_obj.radec_lines[frame][:, 0], g_obj.radec_lines[frame][:, 1],
-                    **plotconfig.RADEC_LINES)
+                    **plotconfig.RADEC_LINES,zorder=-10000000001)
 
 
             # Background stars
             stars_orf = np.array(g_obj.stars_orf)
             stars_orf = stars_orf[is_in_frame(stars_orf, (xmin, xmax), (ymin, ymax))]
-            ax.plot(stars_orf[:,0],stars_orf[:,1], **plotconfig.STAR_STYLE)
+            ax.plot(stars_orf[:,0],stars_orf[:,1], **plotconfig.STAR_STYLE, zorder=-10000000000)
 
         else :
-            ax.plot(g_obj.stars['RA_cor'],g_obj.stars['DEC_cor'], **plotconfig.STAR_STYLE)
+            ax.plot(g_obj.stars['RA_cor'],g_obj.stars['DEC_cor'], **plotconfig.STAR_STYLE, zorder=-10000000000)
 
         # OTHER BODIES IN THE SKY
         for t2 in g_obj.other_targets:
@@ -255,9 +258,9 @@ def plot(
             if np.any(is_in_frame(t2.target_limb[frame], (xmin, xmax), (ymin, ymax))) :
                 ax.annotate( t2.target,
                         (t2.target_center[frame][0], t2.target_center[frame][1]),
-                        color='white', textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10, zorder=t2.zorder)
+                        color='white', textcoords="offset points", xytext=(5, 5), ha='center', fontsize=10, zorder=t2.zorder, clip_on=True)
                 
-                if t2.angular_diameter < 2 :
+                if t2.angular_diameter < np.radians(1) :
                     if t2.target in plotconfig.PLANET_STYLE :
                         ax.plot([t2.target_center[frame][0]], [t2.target_center[frame][1]],
                                 ls='', marker='o', ms = 5, color=plotconfig.PLANET_STYLE[t2.target]['limb']['color'], zorder=t2.zorder)
@@ -339,7 +342,15 @@ def plot(
                     clip_on=True
                     )
 
-
+        if date:
+            ax.annotate(
+                f"Date (UTC): {g_obj.UTC_time}",
+                xy=(0.98, 0.02), xycoords='axes fraction',
+                ha='right', va='bottom',
+                color='black', fontsize=8,
+                bbox=dict(facecolor='white', alpha=0.3, boxstyle='round,pad=0.2'),
+                zorder=100000
+            )
         if show :
             plt.show()
         if save :

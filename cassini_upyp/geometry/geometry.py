@@ -80,7 +80,7 @@ class Geometry:
         else : self.geo_engine = Geometer(self.target, 'CASSINI', self.ET)
         
 
-
+        self.UTC_time = spice.et2utc(self.ET, 'C', 0)
 
 
         
@@ -146,9 +146,8 @@ class Geometry:
             self.target_HD = np.linalg.norm(self.geo_engine.planet_from_obs_j2k -
                                  self.geo_engine.sun_from_obs_j2k)*1000   / astronomical_unit
             
-        if not self.main :
-            self.angular_diameter = max_angular_diameter(self.target_limb['XYZ'])
-            self.zorder= self.geo_engine.zorder
+        self.angular_diameter = max_angular_diameter(self.target_limb['XYZ'])
+        self.zorder= self.geo_engine.zorder
         
 
         # Geometry for main target
@@ -219,9 +218,6 @@ class Geometry:
                     'XYZ'   : lat_line,
                     'RADEC' : xyz2radec(lat_line, units='degrees')
                 })
-
-
-
 
 
 

@@ -8,9 +8,10 @@ Cassini-UPyP is a research-oriented Python toolbox for working with Cassini/UVIS
 
 ## Documentation
 ```{toctree}
-:maxdepth: 2
+:maxdepth: 1
 
 installation
+resources
 configuration
 
 api/index

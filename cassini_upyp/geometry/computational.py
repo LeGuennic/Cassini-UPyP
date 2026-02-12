@@ -513,7 +513,6 @@ def ellipsoid_coords(radii, lon, lat):
     Notes
     -----
     - Supports broadcasting of input arrays for `lon` and `lat`.
-    - Ensures that if the inputs are scalars, the output is a single coordinate vector.
 
     Examples
     --------
