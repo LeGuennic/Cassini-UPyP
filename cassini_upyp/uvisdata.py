@@ -949,15 +949,17 @@ class UVIS_Observation:
         a .LBL/.DAT pair, they are treated as a single explicit product;
         otherwise, each entry is interpreted as a product base path.
 
+    target : str, optional
+        Main target name used for georeference computations. Stored uppercased. Default is ``None``.
+
     prime_instrument : {"PRIME", "UVIS", "CIRS", "VIMS", "ISS"}, optional
-        Prime instrument tag stored in metadata and used for naming. Default is
-        `"PRIME"`. If `"UVIS"` is provided, it is normalized
+        Prime instrument tag stored in metadata and used for naming.
+        If `"UVIS"` is provided, it is normalized
         internally to `"PRIME"`.
     ID : int, optional
         Extra identifier used when multiple observations share the same base name.
         Default is 0 (no identifier).
-    target : str, optional
-        Main target name used for georeference computations. Stored uppercased. Default is ``None``.
+
     name : str, optional
         If provided, overrides the auto-generated observation name.
         The default name is constructed as:
@@ -970,8 +972,8 @@ class UVIS_Observation:
     ----------
     name : str
         Observation name (auto-generated or user-provided).
-    target : str
-        Target name (uppercased).
+    target : str or None
+        Target name (uppercased) or None.
     YEAR : int
         Observation year (from first exposure).
     DOY : int
@@ -1100,9 +1102,9 @@ class UVIS_Observation:
             self,
             *files: str | Path | Iterable[str | Path],
             batch: str | Path | None = None,
-            prime_instrument: Literal["PRIME", "UVIS", "CIRS", "VIMS", "ISS"] = 'PRIME',
-            ID: int = 0,
             target: str = None,
+            prime_instrument: Literal["PRIME", "UVIS", "CIRS", "VIMS", "ISS"] = None,
+            ID: int = 0,
             name: str | None = None,
             sort: bool = True,
     ):
@@ -1188,6 +1190,9 @@ class UVIS_Observation:
         self.prime    = prime_instrument            # UVIS (PRIME), CIRS, VIMS or ISS
         if prime_instrument=='UVIS' : self.prime='PRIME'
         self.is_prime = prime_instrument=='PRIME'
+        if prime_instrument is None :
+            self.is_prime = None
+            self.prime=''
 
         # Detector properties
         self.n_pics   = self.counts.shape[0]   # Number of exposures
@@ -1221,8 +1226,12 @@ class UVIS_Observation:
         else    : self.IDstr = ''
 
         if name is None :
-            # Observation name format : CHANNEL_YEAR_DOY_PRIME(_ID)
-            self.name = str(self.channel)+'_'+str(self.YEAR)+'_'+nameid[8:11]+'_'+self.prime+self.IDstr
+            if self.prime!='' :
+                # Observation name format : CHANNEL_YEAR_DOY_PRIME(_ID)
+                self.name = str(self.channel)+'_'+str(self.YEAR)+'_'+nameid[8:11]+'_'+self.prime+self.IDstr
+            else:
+                # Observation name format : CHANNEL_YEAR_DOY(_ID) self.name = str(self.channel)+'_'+str(self.YEAR)+'_'+nameid[8:11]+self.IDstr
+                self.name = str(self.channel)+'_'+str(self.YEAR)+'_'+nameid[8:11]+self.IDstr
         else : self.name=name
         
 
@@ -1309,16 +1318,18 @@ class UVIS_Observation:
         self.times_exposition = np.array([np.linspace(self.ET_start[i], self.ET_stop[i], PicsPerExposure, endpoint=True) for i in range(self.n_pics)])
 
 
-    def integrate_radiance(self, wl_range: tuple[float, float] = (1600,1900), method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') :
+    def integrate_radiance(self, wl_range: tuple[float, float] = None, method: Literal['simpson', 'trapezoid', 'trapz'] = 'simpson') :
         """
         Integrate the calibrated radiance over a specified wavelength range.
 
         Parameters
         ----------
         wl_range : tuple of float, optional
-            Wavelength range (min, max) for integration. Default is (1600, 1900).
+            Wavelength range (min, max) for integration.
+            If None (default), integrates over the full wavelength range of the detector.
         method : {'simpson', 'trapezoid'}, optional
             Integration method to use. Default is 'simpson'.
+            See :func:`cassini_upyp.uvisutils.integrate_spectrum` for details.
 
         Returns
         -------
@@ -1344,10 +1355,12 @@ class UVIS_Observation:
         count and calibration uncertainties to radiance. If a background level is set,
         adds its contribution in quadrature.
 
+        Uses :func:`cassini_upyp.uvisutils.poisson_error` to compute count uncertainties.
+
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
-            (uncertainty_sup, uncertainty_inf), same shape as `self.counts`.
+            (uncertainty_sup, uncertainty_inf), same shape as ``self.counts``.
 
         Raises
         ------
@@ -1404,6 +1417,7 @@ class UVIS_Observation:
     def smooth(self, force: bool = False, smoothing_kernel: ArrayLike = smoothing_kernel) -> None:
         """
         Smooth the calibrated FUV data and uncertainties using 1D convolution.
+        Uses :func:`cassini_upyp.uvisutils.smooth_spectrum` for convolution.
 
         Parameters
         ----------
@@ -1436,6 +1450,13 @@ class UVIS_Observation:
         """
         Retrieve the calibration multiplier (inverse sensitivity) of the Cassini UVIS instrument.
 
+        The method incorporates several calibration steps:
+
+            - Laboratory calibration data is adjusted for slit width.
+            - Time variation is accounted for using spacecraft time.
+            - Flat-field corrections are applied if `flat_field` is `True`.
+            - Binning is performed according to the spatial and spectral binning factors.
+
         Parameters
         ----------
         sctime : float
@@ -1443,10 +1464,7 @@ class UVIS_Observation:
             modifiers and to select the appropriate flat-field epoch.
         interp : {'linear', 'pchip'}, optional
             Interpolation method used to map the lab calibration to the full detector range.
-            Options are:
-
-            - 'linear' : Linear interpolation.
-            - 'pchip'  : Piecewise Cubic Hermite Interpolating Polynomial.
+            See :func:`uvisutils.interpolate_nans` for details.
 
             Default is 'pchip'.
         flat_field : bool, optional
@@ -1466,13 +1484,6 @@ class UVIS_Observation:
 
         Notes
         -----
-
-        - The method incorporates several calibration steps:
-
-            - Laboratory calibration data is adjusted for slit width.
-            - Time variation is accounted for using spacecraft time.
-            - Flat-field corrections are applied if `flat_field` is `True`.
-            - Binning is performed according to the spatial and spectral binning factors.
 
         - For the FUV channel, pixels known as 'evil' pixels with anomalous behavior are handled,
           and corresponding elements in the arrays are set to NaN.

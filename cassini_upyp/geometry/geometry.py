@@ -52,6 +52,10 @@ def stars_pickles():
 
 
 class Geometry:
+    """
+    Docstring pour Geometry
+    """
+    
     def __init__(self, ET:float,
                  meta_kernel = None, other_bodies=plotconfig.FOV_objects,
                  main=None, u:"UVIS_Observation"=None, target=None, offset=np.array((0,0,0))):
@@ -73,7 +77,7 @@ class Geometry:
 
         # Call geometry engine
         if target : self.target = target
-        elif u is not None : self.target = u.target
+        elif u is not None and u.target is not None: self.target = u.target
         else : raise TypeError("Geometry object requires a valid target.")
 
         if self.main : self.geo_engine = Geometer(self.target, 'CASSINI', self.ET, offset=offset)

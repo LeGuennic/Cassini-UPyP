@@ -8,4 +8,7 @@ This section provides the automatically generated API reference based on the cod
 :maxdepth: 2
 
 uvisdata
+uvisutils
+background
+geometry
 ```

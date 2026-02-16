@@ -180,7 +180,12 @@ def gap_histogram(N: float, L: int) -> np.ndarray:
 
 
 def bg_fit(obs_histogram, detector_shape=1024):
-
+    """
+    Docstring pour bg_fit
+    
+    :param obs_histogram: Description
+    :param detector_shape: Description
+    """
 
     up,low = detector_shape,1
     dc = np.inf
@@ -213,6 +218,16 @@ def bg_fit(obs_histogram, detector_shape=1024):
 
 
 def max_gap(bg_level, integration_time, n_wl=1024, SPECTRAL_BIN=1, SPATIAL_BIN=1, alpha=1e-4):
+    """
+    Docstring pour max_gap
+    
+    :param bg_level: Description
+    :param integration_time: Description
+    :param n_wl: Description
+    :param SPECTRAL_BIN: Description
+    :param SPATIAL_BIN: Description
+    :param alpha: Description
+    """
     
     N = bg_level * integration_time * n_wl * SPATIAL_BIN * SPECTRAL_BIN
     h = gap_histogram(N, L=n_wl)

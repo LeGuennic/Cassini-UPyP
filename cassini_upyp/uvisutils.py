@@ -395,6 +395,39 @@ def interpolate_nans(arr, method: str = "linear"):
 
     return out.squeeze() if was_1d else out
 
+def smooth_spectrum(spectrum: ArrayLike, kernel: ArrayLike, mode: Literal["reflect", "constant", "nearest", "mirror", "wrap"] ='nearest') -> np.ndarray:
+    """
+    Smooths spectral data by applying a 1D convolution along the spectral (last) dimension.
+    
+    Parameters
+    ----------
+    spectrum : numpy.ndarray
+        Input data array. Expected shapes:
+            - 1D: (nwl,)
+            - 2D: (np, nwl)
+            - 3D: (nt, np, nwl)
+    kernel : numpy.ndarray
+        1D convolution kernel.
+    mode : {"reflect", "constant", "nearest", "mirror", "wrap"}, optional
+        Boundary handling mode passed to ``scipy.ndimage.convolve1d``.
+        Default is "nearest", see scipy.ndimage.convolve1d for more information.
+    
+    Returns
+    -------
+    numpy.ndarray
+        The smoothed spectrum with the same shape as `spectrum`.
+    """
+
+    spectrum = np.asarray(spectrum)
+    kernel   = np.asarray(kernel, dtype=float)
+
+    if spectrum.ndim not in (1, 2, 3):
+        raise ValueError("Input array must have at most 3 dimensions.")
+    
+    spectral_axis = spectrum.ndim - 1
+    return convolve1d(spectrum, kernel, axis=spectral_axis, mode=mode)
+
+
 
 # CALIBRATION
 
@@ -601,37 +634,3 @@ def read_spica_ff(filename:str | Path) -> np.ndarray:
 
     # Convert the list to a NumPy array and reshape to 64x1024
     return np.array(data).reshape(64, 1024)
-
-def smooth_spectrum(spectrum: ArrayLike, kernel: ArrayLike, mode: Literal["reflect", "constant", "nearest", "mirror", "wrap"] ='nearest') -> np.ndarray:
-    """
-    Smooths spectral data by applying a 1D convolution along the spectral (last) dimension.
-    
-    Parameters
-    ----------
-    spectrum : numpy.ndarray
-        Input data array. Expected shapes:
-            - 1D: (nwl,)
-            - 2D: (np, nwl)
-            - 3D: (nt, np, nwl)
-    kernel : numpy.ndarray
-        1D convolution kernel.
-    mode : {"reflect", "constant", "nearest", "mirror", "wrap"}, optional
-        Boundary handling mode passed to ``scipy.ndimage.convolve1d``.
-        Default is "nearest", see scipy.ndimage.convolve1d for more information.
-    
-    Returns
-    -------
-    numpy.ndarray
-        The smoothed spectrum with the same shape as `spectrum`.
-    """
-
-    spectrum = np.asarray(spectrum)
-    kernel   = np.asarray(kernel, dtype=float)
-
-    if spectrum.ndim not in (1, 2, 3):
-        raise ValueError("Input array must have at most 3 dimensions.")
-    
-    spectral_axis = spectrum.ndim - 1
-    return convolve1d(spectrum, kernel, axis=spectral_axis, mode=mode)
-
-
