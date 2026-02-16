@@ -527,7 +527,7 @@ class UVIS_Bin:
         self.bin_LOS   = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
 
         # Unbinned data
-        self.name = np.copy(uvis_obs.name)
+        self.name = uvis_obs.name
         self.data = np.copy(uvis_obs.data)
         self.uncertainty_sup = np.copy(uvis_obs.uncertainty_sup)
         self.uncertainty_inf = np.copy(uvis_obs.uncertainty_inf)
