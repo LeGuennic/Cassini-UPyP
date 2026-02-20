@@ -1,6 +1,6 @@
 # Background noise (cassini_upyp.background)
 
-This module contains the main data structures and utilities to load and process Cassini/UVIS PDS3 products.
+This module contains the background noise related routines.
 
 ```{eval-rst}
 .. automodule :: cassini_upyp.background

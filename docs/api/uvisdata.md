@@ -1,6 +1,6 @@
 # Main data (cassini_upyp.uvisdata)
 
-This module contains the main data structures and utilities to load and process Cassini/UVIS PDS3 products.
+This module contains the main data structures to process Cassini/UVIS PDS3 products.
 
 ## Main classes
 
