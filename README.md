@@ -4,7 +4,9 @@ Cassini-UPyP is a Python toolbox for working with Cassini/UVIS PDS3 products (.L
 
 This is not meant to be a black-box “push button, get science” package. The intent is to provide a clean, inspectable codebase that you can clone, read, and modify: if you need to tweak calibration details, masking logic, geometry choices, or binning rules for your own analysis, you should feel comfortable doing so.
 
-An example notebook is available in example/example.ipynb.
+An example notebook is available in `example/example.ipynb`.
+
+## > [Documentation](https://leguennic.github.io/Cassini-UPyP/)
 
 ## Design choices
 
