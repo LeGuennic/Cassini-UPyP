@@ -6,7 +6,7 @@ This is not meant to be a black-box “push button, get science” package. The 
 
 An example notebook is available in `example/example.ipynb`.
 
-## > [Documentation](https://leguennic.github.io/Cassini-UPyP/)
+### > [Documentation](https://leguennic.github.io/Cassini-UPyP/)
 
 ## Design choices
 
