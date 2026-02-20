@@ -3,64 +3,6 @@ import math
 import time
 import os
 
-def bin_array(arr, SPE_UL=None, SPE_LR=None, BIN=1, mean=False):
-    """
-    Bin a 2D array spatially and spectrally over a defined sub-region.
-
-    This function extracts a sub-region from the input 2D array using the provided
-    corner indices. It then applies spatial and spectral binning, effectively reducing
-    the resolution by grouping pixels into bins and computing their average values.
-
-    Parameters
-    ----------
-    arr : np.ndarray
-        The input 2D array (e.g., a sensitivity map).
-    SPA_UL : int
-        Upper-left (inclusive) spatial index (row) of the sub-region.
-    SPA_LR : int
-        Lower-right (inclusive) spatial index (row) of the sub-region.
-    SPE_UL : int
-        Upper-left (inclusive) spectral index (column) of the sub-region.
-    SPE_LR : int
-        Lower-right (inclusive) spectral index (column) of the sub-region.
-    SPATIAL_BIN : int
-        The spatial bin size.
-    SPECTRA_BIN : int
-        The spectral bin size.
-
-    Returns
-    -------
-    np.ndarray
-        A 2D array containing the binned data. Each output element represents the average
-        value of a SPATIAL_BIN x SPECTRA_BIN block from the original sub-region.
-    """
-
-    if SPE_UL is None : SPE_UL=0
-    if SPE_LR is None : SPE_LR=len(arr)-1
-
-    # Extract the specified sub-region
-    arr_win = arr[SPE_UL:SPE_LR+1]
-    width = len(arr_win)
-
-    # Compute the number of bins in each dimension
-    nbins_width  = math.ceil(width  / BIN)
-
-    # Create index arrays for reduceat
-    spe_indices = np.arange(0, nbins_width  *BIN, BIN)
-
-    # Perform binning using np.add.reduceat twice:
-    # First along the spatial axis (rows), then along the spectral axis (columns)
-
-    if not mean : BIN=1
-    binned = np.add.reduceat(
-                arr_win,
-                spe_indices
-             ) / BIN
-
-    return binned
-
-
-
 # FITTING
 def gaps(A):
     """
@@ -97,7 +39,7 @@ def gaps(A):
     if not A.any():
         return None
 
-    # Identify transitions using diff
+    # Identify transitions
     diff = np.diff(A.astype(int))
     starts = np.where(diff == 1)[0] + 1
     ends = np.where(diff == -1)[0] + 1
@@ -116,18 +58,41 @@ def gaps(A):
 
 def histogram(A, max_value=None):
     """
-    Compute the histogram of an array of integers.
+    Compute the frequency histogram of a sequence of non-negative integers.
+
+    This function returns an array of counts such that the element at index ``k``
+    is the number of occurrences of value ``k`` in ``A``. 
 
     Parameters
     ----------
-    A (array-like):
-        Input array of integers.
+    A : array-like of int or None
+        Input values. Values must be non-negative integers. If ``None``, the
+        function returns ``0`` (legacy behavior).
+
+    max_value : int or None, optional
+        If provided, forces the output length to be at least ``max_value + 1``.
+        If ``None``, the maximum of ``A`` is used.
 
     Returns
     -------
-    numpy.ndarray:
-        An array where each index represents a value 
-        and its content is the frequency of that value in A.
+    numpy.ndarray or int
+        If ``A`` is not ``None``, returns a 1D array of counts with length
+        ``max_value + 1``. If ``A`` is ``None``, returns ``0`` (legacy behavior).
+
+    Notes
+    -----
+    - Negative values are not supported by ``numpy.bincount`` and will raise an
+    error.
+    - If ``A`` is empty and ``max_value`` is ``None``, ``A.max()`` raises a
+    ``ValueError``.
+
+    Examples
+    --------
+    >>> histogram([0, 2, 2, 3])
+    array([1, 0, 2, 1])
+
+    >>> histogram([1, 1, 1], max_value=4)
+    array([0, 3, 0, 0, 0])
     """
 
     if A is None :
@@ -161,19 +126,19 @@ def gap_histogram(N: float, L: int) -> np.ndarray:
         Expected number of zero-runs of length x per sample inside the window.
     """
 
-    # Probability that a pixel is empty on the full detector (marginally)
+    # Probability that a pixel is empty on the full detector
     q = (1.0 - 1.0 / L) ** N
     p = 1.0 - q
 
     x = np.arange(L + 1, dtype=float)
     s = np.zeros(L + 1, dtype=float)
 
-    # Expected number of zero-runs of length x in a Bernoulli sequence of length L
-    # (includes boundary runs + internal runs)
+    # Expected number of consecutive zeros of length x in a Bernoulli sequence of length L
+    # (includes zeros at the edge + inside the array)
     # Valid for 1 <= x <= L-1
     s[1:L] = (q ** x[1:L]) * (2.0 * p + (L - x[1:L] - 1.0) * (p ** 2))
 
-    # All-zero window: probability q^L, contributes exactly one run of length L
+    # All-zero case: probability q^L, contributes exactly one run of length L
     s[L] = q ** L
 
     return s
@@ -181,13 +146,43 @@ def gap_histogram(N: float, L: int) -> np.ndarray:
 
 def bg_fit(obs_histogram, detector_shape=1024):
     """
-    Docstring pour bg_fit
-    
-    :param obs_histogram: Description
-    :param detector_shape: Description
+    Estimate the background count level by fitting a model gap histogram
+    to the observed histogram with a least-squares criterion.
+
+    The search is performed by iteratively narrowing the interval
+    ``[low, up]`` around the current best candidate. At each iteration,
+    the function evaluates a grid of candidate counts and selects a smaller
+    bracket centered on the minimum chi-square.
+
+    Parameters
+    ----------
+    obs_histogram : array-like
+        Observed histogram to fit. It must be compatible in shape with the
+        output of ``gap_histogram(count, L=detector_shape)`` (same length).
+
+    detector_shape : int, optional
+        Detector length ``L`` passed to ``gap_histogram`` and upper bound for
+        the tested count values. Default is ``1024``.
+
+    Returns
+    -------
+    int
+        The count value that minimizes the sum of squared residuals between the
+        model gap histogram and ``obs_histogram``.
+
+    Notes
+    -----
+    - The objective function is an unweighted least-squares metric:
+    ``chi2 = sum((model - obs)**2)``. No statistical weighting is applied.
+
+    See Also
+    --------
+    :func:`gap_histogram` : Compute the theoretical gap histogram for a given count.
+
     """
 
     up,low = detector_shape,1
+
     dc = np.inf
     while dc>1:
         dc = (up-low)//10
@@ -205,7 +200,8 @@ def bg_fit(obs_histogram, detector_shape=1024):
             )
 
             chi2_list.append(chi2)
-
+        
+        # Find intervals around the minimum chi2 to narrow the search
         iup,ilow = np.argmin(chi2_list)+1,np.argmin(chi2_list)-1
 
         if ilow==-1 : ilow=0
@@ -213,20 +209,62 @@ def bg_fit(obs_histogram, detector_shape=1024):
 
         up, low = counts[iup],counts[ilow]
 
-    return counts[np.argmin(chi2_list)]#/detector_shape/exposition/kwargs['SPATIAL_BIN']
+    return counts[np.argmin(chi2_list)]
 
 
 
 def max_gap(bg_level, integration_time, n_wl=1024, SPECTRAL_BIN=1, SPATIAL_BIN=1, alpha=1e-4):
     """
-    Docstring pour max_gap
-    
-    :param bg_level: Description
-    :param integration_time: Description
-    :param n_wl: Description
-    :param SPECTRAL_BIN: Description
-    :param SPATIAL_BIN: Description
-    :param alpha: Description
+    Estimate the maximum gap length for a given background level and integration time.
+
+    Given an estimated background level and an integration time, this function
+    computes the expected number of background counts per spectrum and derives the
+    expected (analytical) gap-length histogram. It then returns the smallest gap
+    length ``m`` such that the expected number of gaps of size greater than or
+    equal to ``m`` is below a user-defined threshold ``alpha``.
+
+    Large observed gaps beyond this threshold are
+    interpreted as unlikely to arise from pure background noise and are therefore
+    used as an indicator of signal loss.
+
+    Parameters
+    ----------
+    bg_level : float
+        Estimated background rate (counts per seconds, per spectral bin).
+    integration_time : float
+        Integration time in seconds.
+    n_wl : int, optional
+        Number of spectral bins (wavelength samples) in the spectrum. Default is
+        ``1024``.
+    SPECTRAL_BIN : int, optional
+        Spectral binning factor. Default is ``1``.
+    SPATIAL_BIN : int, optional
+        Spatial binning factor. Default is ``1``.
+    alpha : float, optional
+        False-positive rate threshold on the expected number of long gaps.
+        For example, ``alpha=1e-4`` means that, under the background-only model,
+        a gap longer than the returned threshold would be expected in about
+        1 spectrum out of 10,000 by chance. Default is ``1e-4``.
+
+    Returns
+    -------
+    int
+        Gap length threshold ``m_thr``. Spectra exhibiting gaps longer than this
+        value can be flagged as a signal loss.
+
+    Notes
+    -----
+    The expected total number of background counts per spectrum is estimated as::
+
+        N = bg_level * integration_time * n_wl * SPATIAL_BIN * SPECTRAL_BIN
+
+    The tail expectation is computed from the gap histogram ``h`` as::
+
+        mu_ge[m] = sum_{k=m}^{inf} h[k]
+
+    See Also
+    --------
+    :func:`gap_histogram` : Analytical gap-length histogram under a background-only model.
     """
     
     N = bg_level * integration_time * n_wl * SPATIAL_BIN * SPECTRAL_BIN

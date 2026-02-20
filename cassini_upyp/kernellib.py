@@ -11,17 +11,56 @@ mk_path = Path(kernels_dir) / 'mk'
 # KERNELS -----------------
 def ckernel_covers_yd(ckernel:str, year:str, doy:str) :
     """
-    Parse ckernel filename : YYDDD_YYDDD[ext].bc
+    Return whether a CK kernel file spans a given year/day-of-year date.
+
+    The CK filename is expected to follow the pattern ``YYDDD_YYDDD*.bc``, where
+    the start and stop coverage dates are encoded as two-digit year (YY) and
+    three-digit day-of-year (DDD).
+
+    Parameters
+    ----------
+    ckernel : str
+        CK filename (or basename).
+    year : str
+        Target year (e.g., ``"2007"`` or ``"07"``). Only the last two digits are
+        used.
+    doy : str
+        Target day of year as a zero-padded string (e.g., ``"032"``).
+
+    Returns
+    -------
+    bool
+        ``True`` if the target date falls within the encoded coverage interval
+        (inclusive), otherwise ``False``.
     """
     
-    sta, sto = ckernel[:11].split('_')
-    ysta, dsta = map(int, (sta[:2], sta[2:]))
-    ysto, dsto = map(int, (sto[:2], sto[2:]))
+    start, stop = ckernel[:11].split('_')
+    ystart, dstart = map(int, (start[:2], start[2:]))
+    ystop,  dstop  = map(int, (stop[:2],  stop[2:]))
     target_date = int(year[-2:]) * 1000 + int(doy)
     
-    return ysta * 1000 + dsta <= target_date <= ysto * 1000 + dsto
+    return ystart * 1000 + dstart <= target_date <= ystop * 1000 + dstop
 
 def ckernel_covers_et(ckernel:str, et:float) :
+    """
+    Return whether a CK kernel provides coverage at a given ephemeris time.
+
+    The function checks all objects contained in the CK file and tests whether
+    the input ephemeris time ``et`` falls within any of their coverage intervals.
+
+    Parameters
+    ----------
+    ckernel : str
+        Path to the CK kernel file.
+    et : float
+        Target ephemeris time (seconds past J2000, TDB).
+
+    Returns
+    -------
+    bool
+        ``True`` if any object in the CK kernel covers ``et`` (inclusive),
+        otherwise ``False``.
+    """
 
     ids = spice.ckobj(ckernel)
 
@@ -38,6 +77,29 @@ def ckernel_covers_et(ckernel:str, et:float) :
     return False
 
 def spkernel_covers_et(spkernel:str, et:float, obj_id=-82) :
+    """
+    Return whether an SPK (Spacecraft and Planet) kernel provides coverage at a given ephemeris time.
+
+    The function queries the time coverage for a specified object ID in the SPK
+    file and checks whether the input ephemeris time ``et`` falls within any
+    coverage interval.
+
+    Parameters
+    ----------
+    spkernel : str
+        Path to the SPK kernel file.
+    et : float
+        Target ephemeris time (seconds past J2000, TDB).
+    obj_id : int, optional
+        NAIF ID of the object whose coverage is queried. Default is ``-82``
+        (Cassini spacecraft).
+
+    Returns
+    -------
+    bool
+        ``True`` if the SPK kernel covers ``et`` for the given object ID
+        (inclusive), otherwise ``False``.
+    """
 
     # Get time coverages
     cover = spice.spkcov(spkernel, obj_id)
@@ -51,9 +113,57 @@ def spkernel_covers_et(spkernel:str, et:float, obj_id=-82) :
 
 
 def metakernel(et, save=False, savefile: str = None, filter_yd=None):
-    """Build the list of kernels to load and optionally write a SPICE meta-kernel.
     """
-    # Normalize base directories as Paths
+    Select the SPICE kernels needed for a given epoch and optionally write a meta-kernel file.
+
+    The function inspects the local kernel tree (``kernels_dir``) and builds a list
+    of kernel file paths to load with SPICE for the requested ephemeris time ``et``.
+    It always includes the standard kernels (LSK, SCLK, FK, IK, PCK), then selects:
+
+    - CK kernels whose coverage includes ``et`` (optionally pre-filtered by an
+    encoded year/DOY interval in the CK filename),
+    - SPK kernels whose coverage includes ``et`` for the default target object.
+
+    If multiple CK candidates are found, the selection is further restricted to
+    files whose name contains ``'ra'`` (reconstructed data).
+
+    Optionally, the resulting list can be written as a SPICE meta-kernel file (``.tm``).
+
+    Parameters
+    ----------
+    et : float
+        Ephemeris time (seconds past J2000, TDB) used to select time-dependent kernels.
+    save : bool, optional
+        If ``True``, write a meta-kernel file containing the selected kernels.
+        Default is ``False``.
+    savefile : str or None, optional
+        Output meta-kernel path to the file. If provided without extension, ``.tm`` is
+        appended. If ``None``, a name is generated from ``filter_yd`` (``YY_DDD.tm``)
+        or from ``et`` (``<int(et)>.tm``). Default is ``None``.
+    filter_yd : tuple(str, str) or None, optional
+        Optional pre-filter for CK filenames using a target (year, day-of-year).
+        The CK filename is expected to encode a coverage interval (see
+        ``ckernel_covers_yd``). If ``None``, all CK files are considered.
+        Default is ``None``.
+
+    Returns
+    -------
+    list of str
+        List of kernel file paths (as strings) to be loaded with ``spice.furnsh``.
+
+    Notes
+    -----
+    - The function temporarily loads the LSK and SCLK to allow CK coverage queries,
+    then unloads them before returning.
+    - Paths are returned as strings because SPICE expects string paths.
+
+    See Also
+    --------
+    :func:`ckernel_covers_yd` : CK filename interval filter (YYDDD_YYDDD*.bc).
+    :func:`ckernel_covers_et` : CK coverage test for a given ET.
+    :func:`spkernel_covers_et` : SPK coverage test for a given ET.
+    """
+
     kdir = Path(kernels_dir)
 
     # LSK, SCLK, FK, IK and PCK Kernels
@@ -92,8 +202,8 @@ def metakernel(et, save=False, savefile: str = None, filter_yd=None):
         if ckernel_covers_et(str(ckernel), et):
             ck.add(ckernel)
 
+    # If multiple CK candidates remain, choose the reconstructed kernel ('r')
     if len(ck) > 1:
-        # Keep only files whose name contains 'ra'
         ck = {e for e in ck if 'ra' in e.name}
 
 
@@ -144,7 +254,7 @@ def metakernel(et, save=False, savefile: str = None, filter_yd=None):
         metakernel_content += ")\n\\begintext"
 
         # Write file with Path.write_text
-        metakernel_path = mk_path / savefile
+        metakernel_path = savefile
         metakernel_path.write_text(metakernel_content)
 
     return kernels_to_load
@@ -152,9 +262,40 @@ def metakernel(et, save=False, savefile: str = None, filter_yd=None):
 
 def yd_to_et(year, doy, hour=0, minute=0, second=0):
     """
-    Convert UTC year and day-of-year to ephemeris time (ET, seconds past J2000 TDB).
-    Accepts optional time-of-day. Uses ISO 8601 DOY format with 'Z' (UTC).
+    Convert a UTC calendar date given as (year, day-of-year) to ephemeris time (ET).
+
+    The function builds an ISO-8601 day-of-year UTC string (``YYYY-DDDThh:mm:ss.sssZ``)
+    and converts it to ephemeris time using SPICE ``str2et``.
+
+    Parameters
+    ----------
+    year : int or str
+        UTC year (e.g., ``2009`` or ``"2009"``).
+    doy : int or str
+        UTC day of year in ``[1, 365]`` or ``[1, 366]`` for leap years.
+    hour : int or str, optional
+        UTC hour in ``[0, 23]``. Default is ``0``.
+    minute : int or str, optional
+        UTC minute in ``[0, 59]``. Default is ``0``.
+    second : float or int or str, optional
+        UTC seconds in ``[0.0, 60.0)``. Default is ``0``.
+
+    Returns
+    -------
+    float
+        Ephemeris time in seconds past J2000 (TDB).
+
+    Raises
+    ------
+    ValueError
+        If the day-of-year is out of range for the given year, or if the time of day
+        fields are invalid.
+
+    Notes
+    -----
+    This function requires access to the Leap Seconds Kernel (LSK).
     """
+
     import calendar
     import spiceypy as spice
 
