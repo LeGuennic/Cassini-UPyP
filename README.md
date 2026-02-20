@@ -27,9 +27,9 @@ Supported/recommended workflows are therefore:
 - Runtime dependencies: numpy, scipy, spiceypy, tqdm
 - Optional (plots / GIF export): matplotlib, pillow
 
-## Installation / enabling imports
+## Installation
 
-Option A (recommended): editable install
+Option A: editable install
 
 From the repository root:
 

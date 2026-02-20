@@ -9,7 +9,7 @@ The `example` folder only provides some data and a simple script.
 
 Once downloaded, either run your Python script within the repository or proceed to installation using one of the two methods.
 
-## PYTHONPATH
+## Option 1: PYTHONPATH
 
 You may add the repository root to PYTHONPATH, depending on your OS and Python installation.
 
@@ -17,7 +17,7 @@ For example, on linux:
 `export PYTHONPATH="/path/to/Cassini-UPyP:$PYTHONPATH"`
 
 
-## PIP editable install
+## Option 2: PIP editable install
 Make sure to download the `pyproject.toml` configuration file.
 
 From the repository root:
