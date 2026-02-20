@@ -1,4 +1,5 @@
 # Cassini-UPyP - The UVIS Python Package
+[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://leguennic.github.io/Cassini-UPyP/)
 
 Cassini-UPyP is a Python toolbox for working with Cassini/UVIS PDS3 products (.LBL/.DAT) in a research-oriented workflow.
 
@@ -6,9 +7,7 @@ This is not meant to be a black-box “push button, get science” package. The 
 
 An example notebook is available in `example/example.ipynb`.
 
-Hereafter a short introduction. Refer to the documentation for more details on installation, configuration, and usage:
-
-[![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://leguennic.github.io/Cassini-UPyP/)
+Hereafter a short description. Refer to the [**documentation**](https://leguennic.github.io/Cassini-UPyP/) for more details on installation, configuration, and usage:
 
 ## Requirements
 
