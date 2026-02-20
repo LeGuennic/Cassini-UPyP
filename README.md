@@ -6,20 +6,9 @@ This is not meant to be a black-box “push button, get science” package. The 
 
 An example notebook is available in `example/example.ipynb`.
 
+Hereafter a short introduction. Refer to the documentation for more details on installation, configuration, and usage:
 ### > [Documentation](https://leguennic.github.io/Cassini-UPyP/)
 
-## Design choices
-
-This repository relies on user-editable TOML configuration files stored in user_config/:
-
-- `user_config/env.toml`
-- `user_config/plotting.toml`
-
-At runtime, the code reads these files relative to the repository root (detected from cassini_upyp/utils.py). Because of that, a standard non-editable installation (pip install .) is not the intended mode of use: you would end up having to edit configuration files inside site-packages, which is fragile and discourages experimentation.
-
-Supported/recommended workflows are therefore:
-- add the repository to PYTHONPATH, or
-- install the repository in editable mode (`pip install -e .`)
 
 ## Requirements
 
@@ -27,28 +16,34 @@ Supported/recommended workflows are therefore:
 - Runtime dependencies: numpy, scipy, spiceypy, tqdm
 - Optional (plots / GIF export): matplotlib, pillow
 
+
+## Repository layout
+
+Those are the files and directories you should find in the repository after downloading or cloning. The `cassini_upyp` directory contains the main code, while `user_config` contains user-editable configuration files. The `example` folder provides a simple workflow notebook and some example data.
+
+```
+cassini_upyp/
+  uvisdata.py            Main classes (UVIS_Observation, UVIS_Bin) and I/O logic
+  uvisutils.py           Spectral utilities, calibration helpers, uncertainties
+  background.py          Background noise fit/calculation helpers
+  kernellib.py           SPICE/kernel handling logic
+  geometry/              SPICE-based geometry and plotting routine
+  config/                Code-side defaults and instrument constants
+
+user_config/
+  env.toml               User paths (kernels, calibration files, star file)
+  plotting.toml          Plotting configuration (styles, visible objects, grids)
+
+example/
+  example.ipynb          Example workflow notebook
+  data/                  Small example data (if present)
+```
+
+
 ## Installation
 
-Option A: editable install
-
-From the repository root:
-
-
-```bash
-python -m pip install -e .
-```
-
-With plotting extras:
-
-```bash
-python -m pip install -e ".[plot]"
-```
-
-Option B: add the repository to PYTHONPATH
-
-```bash
-export PYTHONPATH="/path/to/Cassini-UPyP:$PYTHONPATH"
-```
+Once you downloaded or cloned the repository, either run your Python script within the repository or proceed to installation.
+There are two supported installation methods, either add the repository to PYTHONPATH or install it in editable mode using pip.
 
 Make sure you keep the repository layout intact (cassini_upyp/ and user_config/ must remain at the same level).
 
@@ -134,27 +129,9 @@ Typical processing steps depend on what you need, but the workflow generally inc
 
 Refer to `example/example.ipynb` for a more complete run-through.
 
-## Repository layout
 
-```
-cassini_upyp/
-  uvisdata.py            Main classes (UVIS_Observation, UVIS_Bin) and I/O logic
-  uvisutils.py           Spectral utilities, calibration helpers, uncertainties
-  background.py          Background noise fit/calculation helpers
-  kernellib.py           SPICE/kernel handling logic
-  geometry/              SPICE-based geometry and plotting routine
-  config/                Code-side defaults and instrument constants
 
-user_config/
-  env.toml               User paths (kernels, calibration files, star file)
-  plotting.toml          Plotting configuration (styles, visible objects, grids)
-
-example/
-  example.ipynb          Example workflow notebook
-  data/                  Small example data (if present)
-```
-
-## Modifying the code / contributing
+## Modifying the code
 
 If you are using this in your own research, you are encouraged to modify the code locally to match your scientific assumptions and workflow.
 
