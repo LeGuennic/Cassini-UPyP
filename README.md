@@ -18,7 +18,8 @@ Hereafter a short description. Refer to the [**documentation**](https://leguenni
 
 ## Repository layout
 
-Those are the files and directories you should find in the repository after downloading or cloning. The `cassini_upyp` directory contains the main code, while `user_config` contains user-editable configuration files. The `example` folder provides a simple workflow notebook and some example data.
+Those are the files and directories that are useful. The `cassini_upyp` directory contains the main code, while `user_config` contains user-editable configuration files.
+The `example` folder provides a simple workflow notebook and some example data.
 
 ```
 cassini_upyp/
@@ -46,7 +47,7 @@ There are two supported installation methods, either add the repository to PYTHO
 
 Make sure you keep the repository layout intact (cassini_upyp/ and user_config/ must remain at the same level).
 
-## Configuration (TOML)
+## Configuration
 
 This repository ships with user-editable TOML configuration files stored in `user_config/`:
 
@@ -55,7 +56,7 @@ This repository ships with user-editable TOML configuration files stored in `use
 
 After downloading or cloning the repository, you must edit `user_config/env.toml` to point to the external resources available on your machine (SPICE kernels, calibration files, star catalogue).
 
-### user_config/env.toml
+### Environment
 
 This file defines local paths for resources that are not bundled with the code, typically:
 - UVIS calibration files directory
@@ -122,8 +123,8 @@ obs = UVIS_Observation(batch="/path/to/batch_list.txt")
 ```
 
 Typical processing steps depend on what you need, but the workflow generally includes:
-- background estimation/removal
-- radiometric calibration
+- calibration
+- background noise estimation and/or subtraction
 - geometry (SPICE-based)
 
 Refer to `example/example.ipynb` for a more complete run-through.
