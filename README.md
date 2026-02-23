@@ -6,7 +6,7 @@ The **Cassini UVIS Python Package** is a research-oriented Python toolbox for re
 The package aims to provide tools to work with UVIS data, display informations, compute geometry, plot spectra and related products and prepare such data to further processing if needed like forward modelling.
 It is not designed as a black-box tool. The code is meant to be clean, inspectable, and modifiable: if you need to tweak methods or routines for your own analysis, you should feel comfortable doing so.
 
-An example notebook is available in `example/example.ipynb`.
+An example notebook is available in [`example/example.ipynb`](https://github.com/LeGuennic/Cassini-UPyP/blob/7ae7d2d22b5974e9272a3b45302b8fe9d0a0bba9/example/example.ipynb).
 
 Hereafter a short description. Refer to the [**documentation**](https://leguennic.github.io/Cassini-UPyP/) for more details on installation, configuration, and usage:
 
