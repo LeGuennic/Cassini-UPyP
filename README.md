@@ -13,8 +13,8 @@ Hereafter a short description. Refer to the [**documentation**](https://leguenni
 ## Requirements
 
 - Python >= 3.11
-- Runtime dependencies: numpy, scipy, spiceypy, tqdm
-- Optional (plots / GIF export): matplotlib, pillow
+- Runtime dependencies: [NumPy](https://numpy.org/), [SciPy](https://scipy.org/), [SpiceyPy](https://pypi.org/project/spiceypy/), [tqdm](https://pypi.org/project/tqdm/)
+- Optional (plots / GIF export): [Matplotlib](https://matplotlib.org/), [Pillow](https://pypi.org/project/pillow/)
 
 
 ## Repository layout
@@ -24,20 +24,20 @@ The `example` folder provides a simple workflow notebook and some example data.
 
 ```
 cassini_upyp/
-  uvisdata.py            Main classes (UVIS_Observation, UVIS_Bin) and I/O logic
-  uvisutils.py           Spectral utilities, calibration helpers, uncertainties
-  background.py          Background noise fit/calculation helpers
-  kernellib.py           SPICE/kernel handling logic
-  geometry/              SPICE-based geometry and plotting routine
-  config/                Code-side defaults and instrument constants
+├─ uvisdata.py            Main classes (UVIS_Observation, UVIS_Bin) and I/O logic
+├─ uvisutils.py           Spectral utilities, calibration helpers, uncertainties
+├─ background.py          Background noise fit/calculation helpers
+├─ kernellib.py           SPICE/kernel handling logic
+├─ geometry/              SPICE-based geometry and plotting routine
+└─ config/                Code-side defaults and instrument constants
 
 user_config/
-  env.toml               User paths (kernels, calibration files, star file)
-  plotting.toml          Plotting configuration (styles, visible objects, grids)
+├─ env.toml               User paths (kernels, calibration files, star file)
+└─ plotting.toml          Plotting configuration (styles, visible objects, grids)
 
 example/
-  example.ipynb          Example workflow notebook
-  data/                  Small example data (if present)
+├─ example.ipynb          Example workflow notebook
+└─ data/                  Small example data (if present)
 ```
 
 
@@ -46,20 +46,20 @@ example/
 Once you downloaded or cloned the repository, either run your Python script within the repository or proceed to installation.
 There are two supported installation methods, either add the repository to PYTHONPATH or install it in editable mode using pip.
 
-Make sure you keep the repository layout intact (cassini_upyp/ and user_config/ must remain at the same level).
+Make sure you keep the repository layout intact (`cassini_upyp/` and `user_config/` must remain at the same level).
 
 ## Configuration
 
 This repository ships with user-editable TOML configuration files stored in `user_config/`:
 
-- user_config/env.toml
-- user_config/plotting.toml
+- `user_config/env.toml`
+- `user_config/plotting.toml`
 
 After downloading or cloning the repository, you must edit `user_config/env.toml` to point to the external resources available on your machine (SPICE kernels, calibration files, star catalogue).
 
 ### Environment
 
-This file defines local paths for resources that are not bundled with the code, typically:
+The `user_config/env.toml` file defines local paths for resources that are not bundled with the code, typically:
 - UVIS calibration files directory
 - a star catalogue file (stars.npy)
 - SPICE kernels directory and specific kernel paths (IK, LSK)
@@ -68,10 +68,10 @@ This file defines local paths for resources that are not bundled with the code, 
 
 This code requires a small set of external resources that are not bundled with the repository. They must be referenced from `user_config/env.toml`.
 
-1) UVIS calibration files
+### 1) UVIS calibration files
 You must provide the UVIS calibration files directory. These files are required for calibration and related flat field correction steps. Set the corresponding path in `user_config/env.toml:calibration_dir`.
 
-2) SPICE kernels (geometry)
+### 2) SPICE kernels (geometry)
 SPICE kernels are required to compute observation geometry. You can use either of the two supported approaches:
 
 A) Full kernel tree (automatic kernel selection)
@@ -128,7 +128,7 @@ Typical processing steps depend on what you need, but the workflow generally inc
 - background noise estimation and/or subtraction
 - geometry (SPICE-based)
 
-Refer to `example/example.ipynb` for a more complete run-through.
+Refer to [`example/example.ipynb`](https://github.com/LeGuennic/Cassini-UPyP/blob/7ae7d2d22b5974e9272a3b45302b8fe9d0a0bba9/example/example.ipynb) for a more complete run-through.
 
 
 
