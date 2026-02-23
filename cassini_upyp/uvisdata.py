@@ -34,7 +34,9 @@ from .uvisutils import (
 
     # Uncertainty
     poisson_error,
-    correction_factor
+    correction_factor,
+
+    list_ndarray, find_bin_index
 )
 
 # CONFIG
@@ -46,7 +48,7 @@ from .config.uvis import (
     slit_dlambda,
     slit_width
 )
-from .utils import env_config, list_ndarray, find_bin_index
+from .utils import env_config
 env = env_config()
 
 def pds_lbl(labelfile: str | Path) -> "AttrDict":

@@ -1,16 +1,14 @@
-# Python
 from __future__ import annotations
-
 from typing import Literal
 from numpy.typing import ArrayLike
+
+import numpy as np
 from pathlib import Path
 
-# Computational
 from scipy.integrate   import simpson
 from scipy.interpolate import PchipInterpolator
 from scipy.io          import readsav
 from scipy.ndimage     import convolve1d
-import numpy as np
 
 from .utils import env_config
 env = env_config()
@@ -42,8 +40,11 @@ def poisson_error(
     Notes
     -----
     Uses the Garwood (chi-square) construction:
-      U = 0.5 * chi2.ppf(1 - alpha/2, 2*(x+1))
-      L = 0.5 * chi2.ppf(alpha/2,     2*x)   (with L=0 for x=0)
+
+    U = 0.5 * chi2.ppf(1 - alpha/2, 2*(x+1))
+
+    L = 0.5 * chi2.ppf(alpha/2,     2*x)   (with L=0 for x=0)
+
     where alpha = 1 - (Phi(sigma) - Phi(-sigma)).
     """
     
@@ -346,9 +347,11 @@ def interpolate_nans(arr, method: str = "linear"):
         Input data containing NaNs. Cast to float internally.
     method : {"linear", "pchip"}, optional
         Interpolation scheme to use:
+
         - "linear": piecewise linear interpolation using ``np.interp``.
         - "pchip" : monotonic piecewise cubic interpolation using
           ``scipy.interpolate.PchipInterpolator``.
+          
         Default is "linear".
 
     Returns
@@ -634,3 +637,92 @@ def read_spica_ff(filename:str | Path) -> np.ndarray:
 
     # Convert the list to a NumPy array and reshape to 64x1024
     return np.array(data).reshape(64, 1024)
+
+
+# DATA BINS UTILITIES
+def list_ndarray(shape: tuple[int, ...]) -> np.ndarray:
+    """
+    Create a NumPy array (dtype=object) where each cell is initialized as an independant empty list.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        The shape of the array to create.
+
+    Returns
+    -------
+    np.ndarray
+        A NumPy array of the specified shape where each cell is an empty Python list.
+
+    Examples
+    --------
+    Create a 2D array of lists for two properties:
+
+    >>> from cassini_upyp.utils import list_ndarray
+    >>> shape = (3, 2)
+    >>> bins = list_ndarray(shape)
+    >>> bins.shape
+    (3, 2)
+
+    Append data points to a given bin:
+
+    >>> bins[0, 0].append(42.0)
+    >>> bins[0, 0]
+    [42.0]
+    """
+
+    bins_array = np.empty(shape, dtype=object)
+    
+    # Initialize each cell with an empty list.
+    for index in np.ndindex(shape):
+        bins_array[index] = []
+    return bins_array
+
+def find_bin_index(prop: float | ArrayLike, boundaries: Sequence[float], mode: Literal['center', 'all'] = "center") -> int | None:
+    """
+    Determine the bin index for a given property value (or array of values) relative to the provided boundaries.
+
+    In 'center' mode, 'prop' is expected to be a scalar value.
+    In 'all' mode, 'prop' is expected to be an array; all values must fall within the same bin.
+
+    The binning convention is half-open: [edges[i], edges[i+1]),
+    so the last edge is excluded.
+
+    Parameters
+    ----------
+    prop : scalar or array-like
+        The property value(s) for which to determine the bin index.
+    boundaries : sequence of float
+        A sorted list of bin edges.
+    mode : {"center", "all"}, optional
+        The mode of operation:
+        - 'center': use a single representative value.
+        - 'all': require that all values in the pixel fall within the same bin.
+        Default is "center".
+
+    Returns
+    -------
+    int or None
+        The bin index if valid; otherwise, None.
+    """
+    
+    edges = np.array(boundaries)
+
+    if mode == 'center':
+        # Check that the value is within the interval [edges[0], edges[-1])
+        if prop < edges[0] or prop >= edges[-1]:
+            return None
+        idx = int(np.searchsorted(edges, prop, side='right') - 1)
+        return idx
+    elif mode == 'all':
+        arr = np.asarray(prop)
+        if arr.size == 0 or np.min(arr) < edges[0] or np.max(arr) >= edges[-1]:
+            return None
+        indices = np.searchsorted(edges, arr, side='right') - 1
+        
+        # All values must fall into the same bin.
+        if np.all(indices == indices[0]):
+            return int(indices[0])
+        else:
+            return None
+

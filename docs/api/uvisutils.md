@@ -1,6 +1,6 @@
 # Data utilities (cassini_upyp.uvisutils)
 
-This module contains the main data utilities to load and process Cassini/UVIS PDS3 products.
+This module contains the main data utilities to load and process Cassini/UVIS PDS3 products used in [cassini_upyp.uvisdata](uvisdata.md) module.
 
 
 ## Uncertainty utilities
@@ -35,4 +35,12 @@ This module contains the main data utilities to load and process Cassini/UVIS PD
 .. autofunction:: cassini_upyp.uvisutils.get_ff_time_variation
 
 .. autofunction:: cassini_upyp.uvisutils.read_spica_ff
+```
+
+## Data binning
+```{eval-rst}
+
+.. autofunction:: cassini_upyp.uvisutils.list_ndarray
+
+.. autofunction:: cassini_upyp.uvisutils.find_bin_index
 ```

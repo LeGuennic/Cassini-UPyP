@@ -11,5 +11,5 @@ uvisdata
 uvisutils
 background
 geometry
-kernelllib
+kernellib
 ```

@@ -1,3 +1,6 @@
+from typing import Optional, Tuple
+import numpy.typing as npt
+
 import spiceypy as spice
 import numpy as np
 
@@ -8,7 +11,65 @@ from .computational import (
 )
 
 class Geometer:
-    def __init__(self, target, observer, et, offset=np.array((0,0,0))):
+    """
+    Low-level geometry engine for apparent target/line-of-sight computations.
+
+    `Geometer` wraps a set of SPICE and geometric routine calls to compute viewing geometry for a given
+    target body as seen from a given observer at a specified ephemeris time. It
+    provides vectors and helpers to compute the apparent limb (ellipse), the terminator, visible
+    latitude/longitude grid lines, and line-of-sight (LOS) tangent/intersection
+    quantities used by the higher-level :class:`cassini_upyp.geometry.geometry.Geometry` container.
+
+    Parameters
+    ----------
+    target : str
+        SPICE name of the target body (e.g., ``"TITAN"``). Case-insensitive.
+    observer : str
+        SPICE name of the observer (e.g., ``"CASSINI"``). Case-insensitive.
+    et : float
+        Ephemeris time (seconds past J2000, TDB).
+    offset : array-like, optional
+        Optional offset vector passed to the geometry engine to be applied
+        on the main target body, for example to compensate some known bias.
+        Default is ``(0, 0, 0)`` as it should remain unused.
+
+    Attributes
+    ----------
+    planet : str
+        Uppercase target name.
+    observer : str
+        Uppercase observer name.
+    et : float
+        Ephemeris time (seconds past J2000, TDB).
+    radii : ndarray, shape (3,)
+        Target tri-axial radii [km] as returned by SPICE ``BODVRD``.
+    obs_from_planet_brf : ndarray, shape (3,)
+        Observer position vector in the target body-fixed frame (``IAU_<TARGET>``),
+        i.e. vector from target center to observer, with optional ``offset`` added.
+    planet_from_obs_j2k : ndarray, shape (3,)
+        Target position vector in J2000 as seen from the observer (LT+S).
+    sun_from_obs_j2k : ndarray, shape (3,)
+        Sun position vector in J2000 as seen from the observer (LT+S).
+    target_RA, target_DEC : float
+        Apparent target center coordinates (RA, Dec) in radians (J2000).
+    target_distance : float
+        Apparent distance from observer to target center (same units as SPICE output).
+    rotation_IAU_J2K, rotation_J2K_IAU : ndarray, shape (3, 3)
+        Rotation matrices between the target body-fixed frame and J2000 at ``et``.
+    planet_to_sun_brf : ndarray, shape (3,)
+        Vector from target to Sun expressed in the target body-fixed frame.
+
+    Notes
+    -----
+    All SPICE kernels required for the target/observer configuration must be loaded
+    before instantiating this class.
+
+    See Also
+    --------
+    :class:`cassini_upyp.geometry.geometry.Geometry` : High-level container building additional products (FOV, stars, plots).
+    """
+
+    def __init__(self, target: str, observer: str, et: float, offset: npt.ArrayLike = np.array((0,0,0))):
         self.planet   = target.upper()
         self.observer = observer.upper()
         self.et = et
@@ -55,7 +116,50 @@ class Geometer:
         self.planet_to_sun_brf = np.dot(self.rotation_J2K_IAU, planet_to_sun_j2000)
 
 
-    def get_ellipse(self, npoints=100, altitude:float=0, flag_dayside=True):
+    def get_ellipse(self, npoints:int = 100, altitude:float = 0, flag_dayside:bool = True) -> Tuple[npt.NDArray[np.floating], Optional[npt.NDArray[np.bool_]]]:
+        """
+        Compute the apparent target limb as an ellipse and optionally flag day/night points.
+
+        The limb is computed in the target body-fixed frame using SPICE ``edlimb`` for a
+        triaxial ellipsoid (with an optional altitude offset applied to the radii to compute iso-altitude ellipse).
+        The resulting limb points are returned as direction vectors from the observer,
+        expressed in the J2000 frame.
+
+        If ``flag_dayside`` is ``True``, each limb point is classified as belonging to
+        the illuminated hemisphere (day side) or not, based on the Sun direction in the
+        target body-fixed frame. The returned arrays are reordered so that all day-side
+        points are grouped together (then night-side points), following the ordering
+        produced by :func:`cassini_upyp.geometry.computational.order_bool`.
+
+        Parameters
+        ----------
+        npoints : int, optional
+            Number of points used to sample the limb ellipse. Default is ``100``.
+        altitude : float, optional
+            Altitude added to each ellipsoid radius when computing the limb [km].
+            Default is ``0``.
+        flag_dayside : bool, optional
+            If ``True``, also return a boolean mask identifying points on the day side.
+            Default is ``True``.
+
+        Returns
+        -------
+        tuple
+            ``(limb_points, dayside)`` where:
+
+            - limb_points : numpy.ndarray, shape (npoints, 3)
+                Observer-to-limb direction vectors expressed in J2000.
+            - dayside : numpy.ndarray of bool, shape (npoints,), or None
+                Boolean mask indicating day-side limb points after reordering, or
+                ``None`` if ``flag_dayside`` is ``False``.
+
+        Notes
+        -----
+        - The limb is computed for a triaxial ellipsoid using SPICE ``edlimb`` and
+        converted to center/axes form with ``el2cgv``.
+        - Day-side classification relies on a visibility test performed in the body-fixed
+        frame (see :func:`cassini_upyp.geometry.computational.is_visible`).
+        """
 
         angles = np.linspace(0, 2 * np.pi, npoints)
         cos_angles = np.cos(angles)
@@ -92,10 +196,57 @@ class Geometer:
 
         return limb_points_rec, dayside
 
-    def is_visible(self, points, starmode = False, threshold=1.e-6):
+    def is_visible(self, points:npt.ArrayLike, starmode:bool = False, threshold:float = 1.e-6) -> npt.NDArray[np.bool_]:
+        """
+        Test whether points are visible from the observer above the target ellipsoid.
+
+        Calls :func:`cassini_upyp.geometry.computational.is_visible`.
+
+        Parameters
+        ----------
+        points : array-like
+            Vectors (in the target body-fixed frame) from the target center to the
+            points to be tested.
+        starmode : bool, optional
+            Reserved for future use. Currently ignored. Default is ``False``.
+        threshold : float, optional
+            Visibility threshold passed to :func:`cassini_upyp.geometry.computational.is_visible`. Default is ``1e-6``.
+
+        Returns
+        -------
+        numpy.ndarray of bool
+            Boolean mask indicating which points are visible.
+        """
         return is_visible(points, -self.obs_from_planet_brf, self.radii, threshold=threshold)
 
-    def get_terminator(self, npoints=100, full=False) :
+    def get_terminator(self, npoints:int = 100, full:bool = False) -> npt.NDArray[np.floating]:
+        """
+        Compute the apparent terminator curve (day/night boundary) as seen by the observer.
+
+        The terminator is computed by calling SPICE ``edlimb`` with the Sun direction
+        vector expressed in the target body-fixed frame, producing the limb of the
+        illumination ellipse. The resulting points are then expressed as direction
+        vectors from the observer and rotated into the J2000 frame.
+
+        By default, only the portion of the terminator that is visible from the
+        observer is returned. If ``full`` is ``True``, visibility is not enforced and
+        the full sampled curve is returned.
+
+        Parameters
+        ----------
+        npoints : int, optional
+            Number of points used to sample the terminator ellipse. Default is ``100``.
+        full : bool, optional
+            If ``True``, return the full sampled terminator without applying the
+            visibility mask. Default is ``False``.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of shape ``(M, 3)`` containing observer-to-terminator direction vectors
+            expressed in J2000, where ``M <= npoints`` when ``full`` is ``False``.
+        """
+
         angles = np.linspace(0, 2 * np.pi, npoints)
         cos_angles = np.cos(angles)  # Shape: (npoints,)
         sin_angles = np.sin(angles)  # Shape: (npoints,)
@@ -124,7 +275,29 @@ class Geometer:
 
         return terminator
     
-    def get_lon_line(self, lon, latgrid = None) :
+    def get_lon_line(self, lon:float, latgrid:npt.ArrayLike = None) -> npt.NDArray[np.floating]:
+        """
+        Compute the visible portion of a target longitude line.
+
+        The longitude line is generated on the target ellipsoid, transformed into
+        observer-centered vectors in the target body-fixed frame, filtered for
+        visibility from the observer, then rotated into the J2000 frame.
+
+        Parameters
+        ----------
+        lon : float
+            Longitude of the meridian to compute, in radians (body-fixed).
+        latgrid : array-like or None, optional
+            Latitude sampling grid in radians. If ``None``, uses 37 points uniformly
+            spaced from ``-π/2`` to ``π/2`` with a step of 5°.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of shape ``(M, 3)`` containing observer-to-surface direction vectors
+            along the visible part of the meridian, expressed in J2000.
+        """
+
         if latgrid is None:
             latgrid = np.linspace(-np.pi/2, np.pi/2, 37)
         
@@ -139,7 +312,29 @@ class Geometer:
 
         return points
     
-    def get_lat_line(self, lat, longrid = None) :
+    def get_lat_line(self, lat:float, longrid:npt.ArrayLike = None) -> npt.NDArray[np.floating]:
+        """
+        Compute the visible portion of a target latitude line.
+
+        The latitude line is generated on the target ellipsoid, transformed into
+        observer-centered vectors in the target body-fixed frame, filtered for
+        visibility from the observer, then rotated into the J2000 frame.
+
+        Parameters
+        ----------
+        lat : float
+            Latitude of the parallel to compute, in radians (body-fixed).
+        longrid : array-like or None, optional
+            Longitude sampling grid in radians. If ``None``, uses 37 points uniformly
+            spaced from ``0`` to ``2*π`` with a step of 10°.
+
+        Returns
+        -------
+        numpy.ndarray
+            Array of shape ``(M, 3)`` containing observer-to-surface direction vectors
+            along the visible part of the parallel, expressed in J2000.
+        """
+
         if longrid is None:
             longrid = np.linspace(0, 2*np.pi, 37)
         
@@ -153,7 +348,56 @@ class Geometer:
 
         return points
 
-    def LOS_tangent(self, LOS, J2000=True) :
+    def LOS_tangent(self, LOS:npt.ArrayLike, J2000:bool = True) -> npt.NDArray[np.floating]:
+        """
+        Compute line-of-sight (LOS) tangent-point geometry on the target ellipsoid.
+
+        For each input LOS direction vector, this method computes the closest approach
+        (tangent point) to the target triaxial ellipsoid as seen from the observer,
+        then derives standard geometric quantities at that point (longitude, latitude,
+        altitude, solar zenith angle, phase angle, emission angle, and local solar time).
+
+        By default, LOS vectors are assumed to be expressed in J2000 and are rotated
+        into the target body-fixed frame (``IAU_<TARGET>``) before intersection/tangent
+        computations.
+
+        Parameters
+        ----------
+        LOS : array-like
+            Array of LOS direction vectors. Expected shape is ``(N, 3)``.
+        J2000 : bool, optional
+            If ``True`` (default), interpret ``LOS`` in J2000 and rotate it into the
+            target body-fixed frame before computations. If ``False``, ``LOS`` is
+            assumed to already be expressed in the target body-fixed frame.
+
+        Returns
+        -------
+        numpy.ndarray
+            Structured array of shape ``(N,)`` with fields:
+
+            - ``lon``   : Tangent-point longitude [°].
+            - ``lat``   : Tangent-point latitude [°].
+            - ``alt``   : Tangent-point altitude above the reference ellipsoid [km].
+            - ``sza``   : Solar zenith angle [°].
+            - ``phase`` : Phase angle [°].
+            - ``ems``   : Emission angle [°].
+            - ``lt``    : Local solar time [hours] (0–24).
+
+        Notes
+        -----
+        - The tangent point is computed via :func:`cassini_upyp.geometry.computational.intersect` with ``closest_point=True``.
+        - Longitudes are flipped for Titan (``lon = 360 - lon``) to match the project's
+          longitude convention.
+        - Local solar time is computed from longitude relative to the sub-solar
+          longitude and wrapped into ``[0, 24)``.
+
+        See Also
+        --------
+        :func:`cassini_upyp.geometry.computational.intersect` : Compute LOS intersection / closest-approach with an ellipsoid.
+        :func:`cassini_upyp.geometry.computational.ellipsoid_xyz` : Convert Cartesian coordinates to (lon, lat, alt) on an ellipsoid.
+        :func:`cassini_upyp.geometry.computational.vec_angle` : Compute angles between vectors.
+        """
+
         if J2000 :
             LOS = LOS @ self.rotation_J2K_IAU.T  # Shape: (npoints, 3)
         

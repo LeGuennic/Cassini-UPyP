@@ -1,11 +1,10 @@
 from __future__ import annotations
-from typing import Literal
+from typing import Literal, Sequence
+from numpy.typing import ArrayLike
+import warnings
 
 import numpy as np
 import spiceypy as spice
-
-
-import warnings
 from pathlib import Path
 from scipy.constants import astronomical_unit
 
@@ -24,23 +23,49 @@ from .computational import(
 )
 
 
-def stars_pickles():
+def stars_pickles() -> np.ndarray:
     """
-    Loads the pickles' table 15 numpy file.
+    Load the pre-processed Pickles & Depagne (2010) Tycho-2 star catalog subset.
 
-    Parameters
-    ----------
-    None
+    This function loads a NumPy structured array saved as ``stars.npy``.
+    The file is derived from Table 15 of Pickles & Depagne (2010) (Tycho-2
+    spectrally matched catalog) and reduced/filtered for the needs of this
+    package. Only stars with a U band magnitude brighter than 10 are included.
+
+    The returned structured array contains the following fields:
+
+    - ``tyRA``: Right ascension [deg].
+    - ``tyDE``: Declination [deg].
+    - ``pmRA``: Proper motion in RA [mas/yr].
+    - ``pmDE``: Proper motion in Dec [mas/yr].
+
+    - ``Bt`` : Tycho-2 B_T magnitude.
+    - ``eBt``: Uncertainty on B_T.
+    - ``fBt``: Spectrally matched / fitted B_T magnitude.
+    - ``U``  : Spectrally matched / fitted U magnitude.
+
+    - ``RA_cor``  : Proper-motion corrected RA at the observation epoch [°].
+    - ``DEC_cor`` : Proper-motion corrected Dec at the observation epoch [°].
+    - ``XYZ``     : Unit direction vector in the J2000 frame.
 
     Returns
     -------
     numpy.ndarray
-        A structured NumPy array containing the star data.
+        Structured NumPy array containing the star catalog subset.
+
+    Notes
+    -----
+    - ``RA_cor``, ``DEC_cor`` and ``XYZ`` are computed
+    later depending on the observation epoch..
 
     Raises
     ------
     FileNotFoundError
-        If the file 'stars_pickles.npy' does not exist in the specified directory.
+        If the file specified by the user configuration ``env.star_file`` does not exist.
+
+    References
+    ----------
+    - A. Pickles and É. Depagne, 2010, Publications of the Astronomical Society of the Pacific, 122 1437
     """
 
     star_file = Path(env.star_file) # stars.npy
@@ -53,12 +78,93 @@ def stars_pickles():
 
 class Geometry:
     """
-    Docstring pour Geometry
+    Compute and store Cassini/UVIS observation geometry using SPICE.
+
+    This class is a high-level container around a lower-level geometry engine
+    (:class:`Geometer`). It loads the required SPICE kernels (optionally via an
+    auto-selected kernel list), computes target apparent geometry as seen from
+    Cassini at a given ephemeris time, and exposes precomputed quantities in both
+    Cartesian (J2000) and sky coordinates (RA/DEC). When a UVIS observation is
+    provided, the class also computes the UVIS field-of-view geometry, line-of-sight
+    intersections, and star statistics per pixel.
+
+    The object can be created as a "main" geometry instance (responsible for kernel
+    loading/clearing) or as a nested instance used for secondary targets in the
+    field of view. In the latter case, the code uses recursion.
+
+    Parameters
+    ----------
+    ET : float
+        Ephemeris time (seconds past J2000, TDB) at which geometry is evaluated.
+    meta_kernel : str or list[str] or None, optional
+        SPICE meta-kernel path, or explicit list of kernels to load. If ``None``
+        and the instance is "main", kernels are selected automatically for ``ET``
+        using :func:`metakernel`.
+    other_bodies : sequence[str] or None, optional
+        List of additional bodies to search for in the field of view (case
+        insensitive). Only used for the main instance. Default is defined by
+        ``FOV_objects`` list in the user configuration file `plotting.toml`.
+    main : Geometry or None, optional
+        If ``None``, this instance is considered the main one and is responsible
+        for loading/clearing SPICE kernels. If a :class:`Geometry` is provided,
+        this instance acts as a child geometry (e.g., for other targets in the FOV).
+    u : UVIS_Observation or None, optional
+        Observation object providing target name, year/DOY, instrument frame and
+        pixel corner vectors. If provided, UVIS-specific geometry products are
+        computed.
+    target : str or None, optional
+        Target body name (SPICE name). If ``None``, the target is taken from
+        ``u.target``. A target must be provided either explicitly or via ``u``.
+    offset : array-like, optional
+        Optional offset vector passed to the geometry engine to be applied
+        on the main target body, for example to compensate some known bias.
+        Default is ``(0, 0, 0)`` as it should remain unused.
+
+    Attributes
+    ----------
+    UTC_time : str
+        UTC representation of ``ET`` (SPICE ``et2utc`` with calendar format).
+    target_center : dict
+        Target center direction as seen from the observer. Keys include ``'XYZ'``
+        (J2000 unit vector) and ``'RADEC'`` (degrees).
+    target_limb : dict
+        Target limb curve points. Keys include ``'XYZ'`` and ``'RADEC'``.
+    terminator : dict
+        Terminator curve points (absent for target ``'SUN'``).
+    night_side : dict
+        Night-side limb curve points (absent for target ``'SUN'``).
+    angular_diameter : float
+        Apparent angular diameter of the target limb (same units as
+        :func:`max_angular_diameter`).
+    pixels, used_pixels : dict
+        UVIS pixel corners for the full and binned fields of view (J2000 + RA/DEC).
+    pixels_LOS, used_pixels_LOS : ndarray
+        Line-of-sight intersection products returned by the geometry engine.
+    pixel_stars : list[dict]
+        Per-binned-pixel star statistics (count, magnitude, visibility flags).
+
+    Notes
+    -----
+    - When this instance is "main", SPICE kernels are loaded during initialization
+      and cleared via ``spice.kclear()`` at the end of ``__init__``.
+
+    - The class currently performs substantial computation in ``__init__`` and
+      therefore may be expensive to instantiate.
+
+    See Also
+    --------
+    :func:`cassini_upyp.kernellib.metakernel` : Kernel selection helper returning a list of kernels to load.
+    :class:`cassini_upyp.geometry.spice_engine.Geometer` : Low-level geometry engine used to compute limb/LOS products.
     """
     
-    def __init__(self, ET:float,
-                 meta_kernel = None, other_bodies=plotconfig.FOV_objects,
-                 main=None, u:"UVIS_Observation"=None, target=None, offset=np.array((0,0,0))):
+    def __init__(self,
+                 ET:float,
+                 meta_kernel = None,
+                 other_bodies:Sequence[str] = plotconfig.FOV_objects,
+                 main=None,
+                 u:"UVIS_Observation" = None,
+                 target:str = None,
+                 offset:ArrayLike = np.array((0,0,0))):
 
         self.ET   = ET
         self.main = main is None
@@ -170,7 +276,7 @@ class Geometry:
 
             delta_t = (year - 2000) + (doy / 365.0)
 
-            # Proper motion (mas/year → degree/an → degree)
+            # Proper motion (mas/year → degree/year → degree)
             correction_ra  = (self.stars['pmRA'] * 1e-3) / 3600.0 * delta_t
             correction_dec = (self.stars['pmDE'] * 1e-3) / 3600.0 * delta_t
 

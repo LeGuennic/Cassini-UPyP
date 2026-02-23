@@ -5,7 +5,26 @@ All resources must be referenced with the corresponding entries in the `env.toml
 ## Stars catalogue
 
 The `stars.npy` file is provided on the GitHub under the `resource` directory. This binary file is a sample
-of the Pickles and Depagne (2010) catalogue, filtered to stars with UV magnitude below 10 and formatted for the purpose of the package.
+of the [Pickles and Depagne (2010)](https://doi.org/10.1086/657947) catalogue. They use stellar equatorial coordinates and proper motions from the Tycho-2 catalog, providing reliable positions and temporal drift;
+UV magnitudes are derived from spectral fits to multi-band photometry, allowing an estimate of each star’s brightness in the relevant filters.
+The `stars.npy` file contains a subset of the full catalogue, with only stars with a magnitude smaller than 10 in the U band, and only the following fields:
+
+- ``tyRA``: Right ascension [°].
+- ``tyDE``: Declination [°].
+- ``pmRA``: Proper motion in RA [mas/yr].
+- ``pmDE``: Proper motion in Dec [mas/yr].
+
+- ``Bt`` : Tycho-2 B_T magnitude.
+- ``eBt``: Uncertainty on B_T.
+- ``fBt``: Spectrally matched / fitted B_T magnitude.
+- ``U``  : Spectrally matched / fitted U magnitude.
+
+This dataset is stored as a NumPy structured array, and can be loaded with the {py:func}`cassini_upyp.geometry.geometry.stars_pickles` function.
+The array also stores the following fields, that are not part of the original catalogue but are computed for a given observation epoch during the geometric computations:
+
+- ``RA_cor``  : Proper-motion corrected RA at the observation epoch [°].
+- ``DEC_cor`` : Proper-motion corrected Dec at the observation epoch [°].
+- ``XYZ``     : Unit direction vector in the J2000 frame.
 
 ## UVIS calibration files
 

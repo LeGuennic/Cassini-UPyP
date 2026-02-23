@@ -10,8 +10,8 @@ sys.path.insert(0, str(ROOT))
 # -- Project information -----------------------------------------------------
 
 project = "Cassini-UPyP"
-author = "Aodren"
-release = "0.1.0"
+author = "Nathan Le Guennic"
+release = "1.0.0"
 
 # -- General configuration ---------------------------------------------------
 
@@ -41,8 +41,18 @@ html_theme_options = {
     "show_nav_level": 2,
     "show_prev_next": True,
 }
-autodoc_typehints = "signature"
-autodoc_typehints_format = "short"
+autodoc_typehints = "none"           # masque totalement les type hints
 autodoc_preserve_defaults = False
 napoleon_use_ivar = True
 autoclass_content = "class"
+python_use_unqualified_type_names = True
+
+# Prevent expansion of heavy typing aliases (numpy.typing.ArrayLike, etc.)
+autodoc_type_aliases = {
+    # If you annotate with ArrayLike directly:
+    "ArrayLike": "ArrayLike",
+    "NDArray": "numpy.NDArray",
+
+    "npt.ArrayLike": "ArrayLike",
+    "npt.NDArray": "numpy.NDArray",
+}

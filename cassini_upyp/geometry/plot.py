@@ -46,7 +46,7 @@ def plot_pixels(pixels, ax=None, **kwargs) :
     ax.plot(line[0], line[1], **kwargs)
 
 
-
+# MAIN PLOT ROUTINE
 def plot(
     g_obj: geometry,
     mode: Literal['target', 'FOV', 'allsky', 'manual'] = 'target',
@@ -77,11 +77,12 @@ def plot(
     optionally other targets present in the field of view.
 
     The function supports two typical use-cases:
+
     - **Top-level plot** (``ax`` is None, ``g_obj.main`` is True):
-        a new figure/axes is created and styled; axis limits
-        are set automatically from ``mode`` and ``scale`` (unless user ranges are provided).
+      a new figure/axes is created and styled; axis limits
+      are set automatically from ``mode`` and ``scale`` (unless user ranges are provided).
     - **Overlay plot** (``ax`` is provided): the scene is drawn onto an existing axes without
-        restyling or changing axis limits (unless your implementation explicitly does so).
+      restyling or changing axis limits (unless your implementation explicitly does so).
 
     Parameters
     ----------
