@@ -78,14 +78,14 @@ A) Full kernel tree (automatic kernel selection)
 Place your locally downloaded kernels using the following subdirectory layout:
 ```
 spice_kernels/
-    ck/
-    fk/
-    ik/
-    lsk/
-    mk/
-    pck/
-    sclk/
-    spk/
+├─ ck/
+├─ fk/
+├─ ik/
+├─ lsk/
+├─ mk/
+├─ pck/
+├─ sclk/
+└─ spk/
 ```
 
 With this layout, the geometry code can automatically search for and load the appropriate kernels (depending on observation time, frames, and target).
