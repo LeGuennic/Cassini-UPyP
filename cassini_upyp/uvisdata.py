@@ -1712,6 +1712,8 @@ class UVIS_Observation:
             self.geometry.append(self.get_geometry(et, **kwargs))
 
         self.HD = np.mean([g.HD for g in self.geometry])
+        self.sub_sc_point = np.array([[g.sub_sc_lon, g.sub_sc_lat] for g in self.geometry])
+
         self.pixel_LOS = np.array([
             self.geometry[i].used_pixels_LOS for i in range(len(self.geometry))
             ])
