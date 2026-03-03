@@ -1,39 +1,14 @@
 # Cassini-UPyP - The UVIS Python Package
 [![Documentation](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://leguennic.github.io/Cassini-UPyP/)
 
-<div style="display: flex; gap: 1rem; align-items: flex-start;">
+The **Cassini UVIS Python Package** is a research-oriented Python toolbox for reading, processing and analysing data from the [UltraViolet Imaging Spectrograph (UVIS)](https://lasp.colorado.edu/cassini/) on board the Cassini spacecraft.
 
-  <div style="flex: 1;">
-    <p>
-    The <strong>Cassini UVIS Python Package</strong> is a research-oriented Python toolbox for reading,
-    processing and analysing data from the
-    <a href="https://lasp.colorado.edu/cassini/">UltraViolet Imaging Spectrograph (UVIS)</a>
-    on board the Cassini spacecraft.
-    </p>
-    <p>
-      The package aims to provide tools to work with UVIS data, display informations, compute geometry,
-      plot spectra and related products and prepare such data to further processing if needed like forward modelling.
-      It is not designed as a black-box tool. The code is meant to be clean, inspectable, and modifiable:
-      if you need to tweak methods or routines for your own analysis, you should feel comfortable doing so.
-    </p>
-    <p>
-      An example notebook is available in
-      <a href="https://github.com/LeGuennic/Cassini-UPyP/blob/7ae7d2d22b5974e9272a3b45302b8fe9d0a0bba9/example/example.ipynb">
-        <code>example/example.ipynb</code>
-      </a>.
-    </p>
-    <p>
-      Hereafter a short description. Refer to the
-      <a href="https://leguennic.github.io/Cassini-UPyP/"><strong>documentation</strong></a>
-      for more details on installation, configuration, and usage.
-    </p>
-  </div>
+The package aims to provide tools to work with UVIS data, display informations, compute geometry, plot spectra and related products and prepare such data to further processing if needed like forward modelling.
+It is not designed as a black-box tool. The code is meant to be clean, inspectable, and modifiable: if you need to tweak methods or routines for your own analysis, you should feel comfortable doing so.
 
-  <div style="flex: 0 0 320px; text-align: center;">
-    <img src="docs/_static/images/titan_UV.png" alt="UVIS example of Titan" style="width: 200px; height: auto; border-radius: 8px;">
-  </div>
+An example notebook is available in [`example/example.ipynb`](https://github.com/LeGuennic/Cassini-UPyP/blob/7ae7d2d22b5974e9272a3b45302b8fe9d0a0bba9/example/example.ipynb).
 
-</div>
+Hereafter a short description. Refer to the [**documentation**](https://leguennic.github.io/Cassini-UPyP/) for more details on installation, configuration, and usage:
 
 ## Requirements
 
