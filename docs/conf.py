@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 project = "Cassini-UPyP"
 author = "Nathan Le Guennic"
-release = "1.0.1"
+release = "1.2.0"
 
 # -- General configuration ---------------------------------------------------
 
@@ -56,3 +56,4 @@ autodoc_type_aliases = {
     "npt.ArrayLike": "ArrayLike",
     "npt.NDArray": "numpy.NDArray",
 }
+html_static_path = ["_static"]

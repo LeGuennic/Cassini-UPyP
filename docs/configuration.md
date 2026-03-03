@@ -14,6 +14,7 @@ It is shipped with the repository as a template and must be edited by the user t
 - `kernels_dir`: path to the SPICE kernels directory
 - `ik_path`: path to a Instrument Kernel (IK) `.ti` file, for example `cas_uvis_v07.ti`
 - `lsk_path`: path to a Leapsecond Kernel (LSK) `.tls` file, for example `naif0012.tls`
+- `pck_path`: path to a Planetary Constants Kernel (PCK) `.tpc` file, for example `pck00010.tpc`
 
 Absolute paths are recommended to avoid ambiguity.
 

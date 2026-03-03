@@ -738,3 +738,42 @@ def ellipsoid_xyz(radii: ArrayLike, vec: ArrayLike, return_altitude: bool = True
         if vec.shape[0]==1 :
             return longitude.squeeze(), latitude.squeeze(), norm_vec.squeeze()
         else : return longitude, latitude, norm_vec
+
+def ellipsoid_radius(radii: ArrayLike, lon: ArrayLike, lat: ArrayLike) -> np.ndarray | float:
+    """
+    Compute the radial distance from the center to a triaxial ellipsoid surface
+    in the direction defined by (lon, lat).
+
+    Notes
+    -----
+    `lat` is assumed to be a planetocentric (geocentric-like) latitude, i.e.
+    the latitude defining the direction vector from the ellipsoid center.
+    """
+
+    radii = np.asarray(radii, dtype=float)
+    if radii.size != 3:
+        raise ValueError("`radii` must contain exactly three elements: (a, b, c).")
+    a, b, c = radii.reshape(3)
+
+    lon = np.asarray(lon, dtype=float)
+    lat = np.asarray(lat, dtype=float)
+
+    try:
+        lon, lat = np.broadcast_arrays(lon, lat)
+    except ValueError as e:
+        raise ValueError("`lon` and `lat` could not be broadcast to a common shape.") from e
+
+    cos_lat = np.cos(lat)
+    sin_lat = np.sin(lat)
+    cos_lon = np.cos(lon)
+    sin_lon = np.sin(lon)
+
+    denom = np.sqrt(
+        (b * c * cos_lat * cos_lon) ** 2 +
+        (a * c * cos_lat * sin_lon) ** 2 +
+        (a * b * sin_lat) ** 2
+    )
+
+    radius = (a * b * c) / denom
+
+    return radius.item() if radius.ndim == 0 else radius

@@ -48,6 +48,22 @@ geometry_spice_engine
 ```{eval-rst}
 .. autofunction:: cassini_upyp.geometry.plot.plot
 ```
+```{figure} ../_static/images/geometry_51.png
+:alt: Example of observation geometry
+:width: 70%
+
+Observation geometry during flyby T10 on 15 January 2006.
+```
+
+```{eval-rst}
+.. autofunction:: cassini_upyp.geometry.UV_picture.UV_picture
+```
+```{figure} ../_static/images/titan_UV.png
+:alt: Example UV image of Titan
+:width: 70%
+
+Example FUV image of Titan during flyby T10 on 15 January 2006. The wavelength band used in this image is 1600-1900 Å.
+```
 
 ## Miscellaneous
 See the [resources page](../resources.md).

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal
+from typing import Literal, Sequence
 from numpy.typing import ArrayLike
 
 import numpy as np
@@ -678,20 +678,20 @@ def list_ndarray(shape: tuple[int, ...]) -> np.ndarray:
         bins_array[index] = []
     return bins_array
 
-def find_bin_index(prop: float | ArrayLike, boundaries: Sequence[float], mode: Literal['center', 'all'] = "center") -> int | None:
+def find_bin_index(value: float | ArrayLike, boundaries: Sequence[float], mode: Literal['center', 'all'] = "center", modulo: float = None) -> int | None:
     """
-    Determine the bin index for a given property value (or array of values) relative to the provided boundaries.
+    Determine the bin index for a given valueerty value (or array of values) relative to the provided boundaries.
 
-    In 'center' mode, 'prop' is expected to be a scalar value.
-    In 'all' mode, 'prop' is expected to be an array; all values must fall within the same bin.
+    In 'center' mode, 'value' is expected to be a scalar value.
+    In 'all' mode, 'value' is expected to be an array; all values must fall within the same bin.
 
     The binning convention is half-open: [edges[i], edges[i+1]),
     so the last edge is excluded.
 
     Parameters
     ----------
-    prop : scalar or array-like
-        The property value(s) for which to determine the bin index.
+    value : scalar or array-like
+        The valueerty value(s) for which to determine the bin index.
     boundaries : sequence of float
         A sorted list of bin edges.
     mode : {"center", "all"}, optional
@@ -699,6 +699,10 @@ def find_bin_index(prop: float | ArrayLike, boundaries: Sequence[float], mode: L
         - 'center': use a single representative value.
         - 'all': require that all values in the pixel fall within the same bin.
         Default is "center".
+    modulo : float, optional
+        If provided, a lower boundary that is higher than the upper boundary will be considered valid,
+        and the binning will be treated as cyclic with the given period.
+        For example, a boudary of [350, 10] with modulo=360 would mean that values in [350, 360) and [0, 10) belong to the same bin.
 
     Returns
     -------
@@ -710,19 +714,27 @@ def find_bin_index(prop: float | ArrayLike, boundaries: Sequence[float], mode: L
 
     if mode == 'center':
         # Check that the value is within the interval [edges[0], edges[-1])
-        if prop < edges[0] or prop >= edges[-1]:
+        if (value < edges[0] or value >= edges[-1]) and modulo is None:
             return None
-        idx = int(np.searchsorted(edges, prop, side='right') - 1)
-        return idx
+
+        for i in range(len(edges)-1):
+            if modulo is not None and edges[i] > edges[i+1]: # Handle cyclic bin
+                if (( value >= 0        and value < edges[i+1] ) or
+                    ( value >= edges[i] and value < modulo     )):
+                    return i
+            elif edges[i] <= value < edges[i+1]:
+                return i
+            
     elif mode == 'all':
-        arr = np.asarray(prop)
-        if arr.size == 0 or np.min(arr) < edges[0] or np.max(arr) >= edges[-1]:
+        arr = np.asarray(value)
+        if arr.size == 0 or ((np.min(arr) < edges[0] or np.max(arr) >= edges[-1]) and modulo is None):
             return None
-        indices = np.searchsorted(edges, arr, side='right') - 1
         
-        # All values must fall into the same bin.
-        if np.all(indices == indices[0]):
-            return int(indices[0])
-        else:
-            return None
+        for i in range(len(edges)-1):
+            if modulo is not None and edges[i] > edges[i+1]: # Handle cyclic bin
+                if np.all(((arr >= 0) & (arr < edges[i + 1])) |
+                        ((arr >= edges[i]) & (arr < modulo))):
+                    return i
+            elif np.all((edges[i] <= arr) & (arr < edges[i+1])):
+                return i
 

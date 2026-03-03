@@ -1798,6 +1798,35 @@ class UVIS_Observation:
             plt.close('all')
 
 
+    # -------- UV PICTURE
+
+    def UV_picture(self, wl_range: tuple[float, float] | None = None, **kwargs):
+        """
+        Build and plot a projected UV radiance map for this observation.
+
+        This is a convenience wrapper around :func:`cassini_upyp.geometry.UV_picture.UV_picture`.
+        See that function for the full parameter list and plotting options.
+
+        Parameters
+        ----------
+        wl_range : tuple[float, float] or None, optional
+            Wavelength interval passed to the UV map builder.
+        **kwargs
+            Additional keyword arguments forwarded to
+            :func:`cassini_upyp.geometry.UV_picture.UV_picture`.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Figure containing the UV map.
+        matplotlib.axes.Axes
+            Axes containing the UV map.
+        """
+
+        from .geometry.UV_picture import UV_picture
+        return UV_picture(self, wl_range=wl_range, **kwargs)
+
+
     # -------- STARS IDENTIFICATION
     def add_pixel_stars_from_file(self, file: str | Path):
         """
@@ -1909,8 +1938,9 @@ class UVIS_Observation:
             exp_range: tuple[int, int] = None
         ):
         """
-        Create a heatmap of integrated radiance and highlight pixels affected by stars.
-        The heatmap is interactive for the user to identify pixels as contaminated by a star.
+        Create a heatmap of integrated radiance similar to a chronophotography and highlight pixels affected by stars.
+        The heatmap is interactive for the user to identify pixels as contaminated (by stars, other objects, or
+        any pixel to remove from analysis).
 
         Parameters
         ----------
@@ -1925,9 +1955,10 @@ class UVIS_Observation:
         exp_range : tuple of int, optional
             Range of exposures to display (start, end). If None, all exposures are shown.
 
-        Notes
-        -----
-        The heatmap displays integrated radiance with annotations and rectangles indicating star-contaminated pixels.
+        See Also
+        --------
+        :func:`cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance` : Compute integrated radiance used in this plot.
+        :func:`cassini_upyp.geometry.UV_picture.UV_picture` : Create a UV image of the observation.
         """
 
         from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -2336,7 +2367,8 @@ class UVIS_Observation:
             default_alt_bins,
             [0,12,24]
         ),
-        mode: Literal['center', 'all'] = 'center'
+        mode: Literal['center', 'all'] = 'center',
+        modulo: float | None = None,
     ) -> 'UVIS_Bin':
         """
         Bin detector pixels either automatically using geometric criteria or manually
@@ -2382,6 +2414,8 @@ class UVIS_Observation:
         bin_boundaries : tuple of sequences, optional
             Bin boundaries for each geometric key. The number of boundary arrays
             must match the number of keys.
+            Bin boudaries must be monotonically increasing and cover the range of values in the data.
+            Modular quantities (e.g. longitude, local time) are handled with wrap-around logic.
 
         mode : {'center', 'all'}, optional
             Selection mode for geometric binning:
@@ -2389,6 +2423,10 @@ class UVIS_Observation:
             - ``'center'`` : use the central LOS value of each pixel.
             - ``'all'``    : require all LOS samples of the pixel to fall within
                             the bin boundaries.
+
+        modulo : float, optional
+            Modulo value for wrap-around of geometric quantities (e.g. 360 for longitude, 24 for local time).
+            Required if any of the keys are modular.
 
         Returns
         -------
@@ -2405,7 +2443,7 @@ class UVIS_Observation:
 
         Examples
         --------
-        Automatic geometric binning by altitude and latitude::
+        Automatic geometric binning by altitude and latitude:
 
             bins = uvis_obs.bin_pixels(
                 keys=('alt', 'lat'),
@@ -2415,14 +2453,22 @@ class UVIS_Observation:
                 ),
                 mode='center'
             )
-
-        Manual binning of explicitly selected pixels into a single bin::
+        Automatic geometric binning by longitude:
+            bins = uvis_obs.bin_pixels(
+                keys=('lon',),
+                bin_boundaries=(
+                    [350, 10, 30], # Two bins: [350-360] U [0-10], and [10-30] degrees
+                ),
+                modulo = 360
+                )
+        
+        Manual binning of explicitly selected pixels into a single bin:
 
             bins = uvis_obs.bin_pixels(
                 pixels=[(20, 39), (21, 40), (22, 41)]
             )
 
-        Manual binning into multiple independent bins::
+        Manual binning into multiple independent bins:
 
             bins = uvis_obs.bin_pixels(
                 pixels=[
@@ -2533,87 +2579,6 @@ class UVIS_Observation:
         
 
     # -------- SAVE MANAGMENT
-
-    def save_npz_plain(self, filepath, overwrite=False, compress=True):
-        """
-        Save selected attributes of obj into a .npz file.
-        Stores:
-        - numpy arrays as-is
-        - scalars/strings as 0-D numpy arrays
-        - lists/tuples as numpy arrays (must not become dtype=object)
-        """
-
-        def _convert(v):
-            if isinstance(v, np.ndarray):
-                return v
-            elif isinstance(v, Path):
-                return np.array(str(v))
-            elif isinstance(v, np.generic):
-                return np.array(v.item())
-            elif isinstance(v, (str, int, float, bool)) or v is None:
-                return np.array(v)
-            elif isinstance(v, (list, tuple)):
-                arr = np.array(v)
-                if arr.dtype == object:
-                    raise TypeError(
-                        "Attribute becomes dtype=object (not safe without pickle). "
-                    )
-                return arr
-            else:
-                raise TypeError(
-                    f"Attribute has unsupported type {type(v)} for plain npz. "
-                )
-            
-
-        keys = []
-
-        # Scalars
-        for name, value in vars(self).items():
-            if isinstance(value, (str, int, float, bool)) or value is None:
-                keys.append(name)
-            elif isinstance(value, np.generic):  # numpy scalar types (np.int64, np.float32, ...)
-                keys.append(name)
-
-        # Arrays
-        keys.extend([
-            'counts', 'raw_files',
-            'ET_start', 'ET_middle', 'ET_stop', 'UTC_start', 'UTC_middle', 'UTC_stop',
-            'WL', 'sctime_sec_start', 'pixel_stars', 'pixel_corrupted', 'pixel_stars_mask',
-            'evil_pixels', 'evil_pixels_binned'
-            ])
-
-
-        payload = {}
-
-        for k in keys:
-            v = getattr(self, k)
-            payload[k] = _convert(v)
-            
-        for k in vars(self.instrument).keys():
-            if k.startswith('_'):
-                continue
-            v = getattr(self.instrument, k)
-            key_name = f'inst_{k}'
-            payload[key_name] = _convert(v)
-
-
-        # Save
-        p = Path(filepath)
-        if p.suffix.lower() != ".uvis":
-            p = p.with_suffix(".uvis")
-
-        if p.exists() and not overwrite:
-            raise FileExistsError(f"File already exists: {p}")
-
-        if compress:
-            np.savez_compressed(p, **payload)
-        else:
-            np.savez(p, **payload)
-
-        return str(p)
-    
-
-
     def save(self, filepath: str = None, overwrite: bool = False, fullsave=False):
         """
         Saves the current UVIS_Observation instance to a pickle (.pkl) file.
