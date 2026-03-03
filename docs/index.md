@@ -1,8 +1,6 @@
 # Cassini-UPyP
 <div style="display: flex; gap: 1rem; align-items: flex-start;">
 
-
-
   <div style="flex: 1;">
     <p>
     The <strong>Cassini UVIS Python Package</strong> is a research-oriented Python toolbox for reading, processing and analysing data from the <a href="https://lasp.colorado.edu/cassini/">UltraViolet Imaging Spectrograph (UVIS)</a> on board the Cassini spacecraft.
