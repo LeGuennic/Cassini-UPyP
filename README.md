@@ -30,7 +30,7 @@
   </div>
 
   <div style="flex: 0 0 320px; text-align: center;">
-    <img src="docs/_static/images/titan_UV.png" alt="UVIS example of Titan" style="width: 100%; height: auto; border-radius: 8px;">
+    <img src="docs/_static/images/titan_UV.png" alt="UVIS example of Titan" style="width: 200px; height: auto; border-radius: 8px;">
   </div>
 
 </div>
