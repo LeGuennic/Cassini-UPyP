@@ -1,1 +1,4 @@
 example/example.ipynb linguist-vendored
+
+docs/                 export-ignore
+.github/              export-ignore
