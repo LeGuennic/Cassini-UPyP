@@ -1029,6 +1029,11 @@ class UVIS_Observation:
         Shape: (n_pics, n_pixels, 5) for each field.
         The last dimension corresponds to the pixel center,
         bottom-left, bottom-right, upper-right, and upper-left corners, respectively.
+    spacecraft_position : numpy.ndarray or None
+        Sub-spacecraft point properties in planetocentric coordinates (shape: (n_pics,)
+        Fields: ``"lon"`` [°], ``"lat"`` [°], ``"alt"`` [km],
+        ``"sza"`` [°], ``"phase"`` [°], ``"ems"`` [°], ``"lt"`` [h].
+        Altitude is the spacecraft altitude.
     HD : float or None
         Mean heliocentric distance during the observation. Populated by :meth:`set_geometry()`.
 
@@ -1704,19 +1709,27 @@ class UVIS_Observation:
         and line-of-sight pixel data.
         """
         
-        self.geometry = []
+        self.spacecraft_position = []
+        HD        = []
+        pixel_LOS = []
+        pixel_star = []
+        n_used_pixels = []
         if et_range is None : et_range = self.ET_middle
 
         for i in tqdm(range(len(et_range)), desc="Computing geometry", file=sys.stdout):#, ncols=100) :
             et = et_range[i]
-            self.geometry.append(self.get_geometry(et, **kwargs))
+            g = self.get_geometry(et, **kwargs)
+            HD.append(g.HD)
+            self.spacecraft_position.append(g.spacecraft_position)
+            pixel_LOS.append(g.used_pixels_LOS)
+            pixel_star.append(g.pixel_stars)
 
-        self.HD = np.mean([g.HD for g in self.geometry])
-        self.sub_sc_point = np.array([[g.sub_sc_lon, g.sub_sc_lat] for g in self.geometry])
+            n_used_pixels.append(g.n_used_pixels)
+        
 
-        self.pixel_LOS = np.array([
-            self.geometry[i].used_pixels_LOS for i in range(len(self.geometry))
-            ])
+        self.HD = np.mean(HD)
+        self.spacecraft_position = np.array(self.spacecraft_position)
+        self.pixel_LOS = np.array(pixel_LOS)
         
 
         dtype = np.dtype([
@@ -1726,17 +1739,16 @@ class UVIS_Observation:
             ('on_disk', bool  )
         ])
 
-        n_pixels = self.geometry[0].n_used_pixels
-
+        n_pixels = n_used_pixels[0]
         self.pixel_star_geometry = [
             (
-                self.geometry[i].pixel_stars[j]["MAG"],
-                self.geometry[i].pixel_stars[j]["is_UV"],
-                self.geometry[i].pixel_stars[j]["number"],
-                self.geometry[i].pixel_stars[j]["on_disk"]
+                pixel_star[i][j]["MAG"],
+                pixel_star[i][j]["is_UV"],
+                pixel_star[i][j]["number"],
+                pixel_star[i][j]["on_disk"]
             )
             for i in range(self.n_pics)
-            for j in range(self.geometry[i].n_used_pixels)
+            for j in range(n_used_pixels[i])
         ]
 
         self.pixel_star_geometry = np.array(
@@ -2579,7 +2591,7 @@ class UVIS_Observation:
         
 
     # -------- SAVE MANAGMENT
-    def save(self, filepath: str = None, overwrite: bool = False, fullsave=False):
+    def save(self, filepath: str = None, overwrite: bool = False):
         """
         Saves the current UVIS_Observation instance to a pickle (.pkl) file.
         The object is save without self.geometry attribute unless keyword fullsave
@@ -2592,11 +2604,6 @@ class UVIS_Observation:
         overwrite : bool, optional
             If True, overwrites an existing file without asking.
             Defaults to False.
-        fullsave  : bool, optional
-            If False, self.geometry attribute is removed from the saved
-            If True, all the class instance is saved, taking much
-            more time.
-
         Returns
         -------
         str
@@ -2609,12 +2616,6 @@ class UVIS_Observation:
         OSError
             For other I/O-related errors.
         """
-        flag_fullsave = False
-        if not fullsave and hasattr(self, 'geometry') :
-            tmp = self.geometry
-            del self.geometry
-            flag_fullsave = True
-
 
         if filepath is None: filepath = f"{self.name}.uvis"
 
@@ -2635,8 +2636,6 @@ class UVIS_Observation:
             pickle.dump(self, f)
         
         print(' Done')
-
-        if flag_fullsave: self.__setattr__('geometry', tmp)
         return filepath
 
 

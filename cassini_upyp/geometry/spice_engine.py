@@ -353,7 +353,7 @@ class Geometer:
         Compute line-of-sight (LOS) tangent-point geometry on the target ellipsoid.
 
         For each input LOS direction vector, this method computes the closest approach
-        (tangent point) to the target triaxial ellipsoid as seen from the observer,
+        (tangent point) and/or the intersection point to the target triaxial ellipsoid as seen from the observer,
         then derives standard geometric quantities at that point (longitude, latitude,
         altitude, solar zenith angle, phase angle, emission angle, and local solar time).
 
@@ -375,21 +375,28 @@ class Geometer:
         numpy.ndarray
             Structured array of shape ``(N,)`` with fields:
 
-            - ``lon``   : Tangent-point longitude [°].
-            - ``lat``   : Tangent-point latitude [°].
-            - ``alt``   : Tangent-point altitude above the reference ellipsoid [km].
-            - ``sza``   : Solar zenith angle [°].
-            - ``phase`` : Phase angle [°].
-            - ``ems``   : Emission angle [°].
-            - ``lt``    : Local solar time [hours] (0–24).
+            - ``lon``   : Intersection longitude [°].
+            - ``lat``   : Intersection latitude [°].
+            - ``alt``   : Tangent point altitude above the reference ellipsoid [km]. (Negative if LOS intersects the ellipsoid)
+            - ``sza``   : Solar zenith angle [°] at the intersection point.
+            - ``phase`` : Phase angle [°] at the intersection point.
+            - ``ems``   : Emission angle [°] at the intersection point.
+            - ``lt``    : Local solar time [hours] (0–24) at the intersection point.
+            - ``t_lon`` : Longitude of the closest point to the ellipsoid center along the LOS (tangent point) [°].
+            - ``t_lat`` : Latitude of the closest point to the ellipsoid center along the LOS (tangent point) [°].
+            - ``t_sza`` : Solar zenith angle at the tangent point [°].
+            - ``t_phase`` : Phase angle at the tangent point [°].
+            - ``t_ems`` : Emission angle at the tangent point [°].
+            - ``t_lt`` : Local solar time at the tangent point [hours] (0–24).
 
         Notes
         -----
         - The tangent point is computed via :func:`cassini_upyp.geometry.computational.intersect` with ``closest_point=True``.
-        - Longitudes are flipped for Titan (``lon = 360 - lon``) to match the project's
-          longitude convention.
+          The intersection point (if it exists) is computed with ``closest_point=False``.
+        - Longitudes are flipped for Titan (``lon = 360 - lon``) to match the westward-positive convention.
         - Local solar time is computed from longitude relative to the sub-solar
           longitude and wrapped into ``[0, 24)``.
+        - The intersection altitude is not given since it is a trivial 0.
 
         See Also
         --------
@@ -404,30 +411,50 @@ class Geometer:
         planet_to_sun_brf,_ = spice.spkpos('SUN', self.et, 'IAU_' + self.planet, 'LT+S', self.planet)
 
         self.sub_solar_longitude, _, _ = ellipsoid_xyz(self.radii, planet_to_sun_brf, units='degrees')
-        if self.planet=='TITAN':
-            self.sub_solar_longitude = 360 - self.sub_solar_longitude
+
         
-
-        tangent_point  , found  = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=True)
-        # intersect_point, found  = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=False)
-        # tangent_point[found] = intersect_point[found]
-
-
+        # Properties for closest point to the target center (tangent point)
+        tangent_point, found  = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=True)
         tangent_point_to_sun = planet_to_sun_brf - tangent_point
 
-        lons, lats, alts = ellipsoid_xyz(self.radii, tangent_point, units='degrees')
-        if self.planet=='TITAN': lons = 360-lons
-        sza   = vec_angle(tangent_point, tangent_point_to_sun)
-        phase = vec_angle(-LOS,           tangent_point_to_sun)
-        ems   = vec_angle(-LOS,           tangent_point)
+        t_lons, t_lats, alts = ellipsoid_xyz(self.radii, tangent_point, units='degrees')
 
-        lst = 12.0 - (lons - self.sub_solar_longitude) * (24.0 / 360.0)
-        # On peut éventuellement ramener la LST dans l'intervalle 0-24 :
+        t_lst = 12.0 + ((t_lons - self.sub_solar_longitude)) * (24.0 / 360.0)
+        t_lst = t_lst % 24.0
+
+        
+
+        
+        t_sza   = vec_angle(tangent_point, tangent_point_to_sun)
+        t_phase = vec_angle(-LOS,          tangent_point_to_sun)
+        t_ems   = vec_angle(-LOS,          tangent_point)
+        
+        # Properties for intersection point with the surface
+        # (no difference if LOS is not looking at the disk)
+        tangent_point, found  = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=False)
+        tangent_point_to_sun = planet_to_sun_brf - tangent_point
+
+        lons, lats, _ = ellipsoid_xyz(self.radii, tangent_point, units='degrees')
+
+
+
+
+        lst = 12.0 + ((lons - self.sub_solar_longitude)) * (24.0 / 360.0)
         lst = lst % 24.0
 
+        
+        if self.planet.upper()=='TITAN':
+            self.sub_solar_longitude = 360 - self.sub_solar_longitude
+            lons   = 360-lons
+            t_lons = 360-t_lons
+            
+        sza   = vec_angle(tangent_point, tangent_point_to_sun)
+        phase = vec_angle(-LOS,          tangent_point_to_sun)
+        ems   = vec_angle(-LOS,          tangent_point)
 
-        keys  = ['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt"]
-        param = [ lons,  lats,  alts,  sza,   phase,   ems,   lst]
+
+        keys  = ['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt", "t_lon", "t_lat", "t_sza", "t_phase", "t_ems", "t_lt"]
+        param = [ lons,  lats,  alts,  sza,   phase,   ems,   lst,  t_lons,  t_lats,  t_sza,   t_phase,   t_ems,   t_lst]
         dtype = [(k,float) for k in keys]
         
         params = np.zeros(LOS.shape[0], dtype=dtype)

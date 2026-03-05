@@ -32,58 +32,67 @@ def UV_picture(
     """
     Build and plot a projected UV radiance image.
 
-    The function projects each UVIS pixel footprint onto a 2D plane centered on the
-    target body and fill the quadrilateral with the integrated radiance.
-    The projection is built from per-pixel tangent-point geometry of its 4 corners (longitude,
-    latitude, altitude).
-    Regions of space covered by multiple pixel footprints are averaged,
-    while grid cells not covered byany footprint are masked.
+    Each UVIS pixel footprint is projected onto a regular grid using the
+    tangent-point geometry of its four corners (local time, latitude, altitude).
+    Grid cells covered by several footprints are averaged; cells with no
+    coverage are masked.  The result is rendered either as a contour fill
+    (``interpol=True``) or as a raw grid image (``interpol=False``).
 
     Parameters
     ----------
-    obs : :class:`cassini_upyp.uvisdata.UVIS_Observation`
-        Observation providing geometry and radiance information.
+    obs : UVIS_Observation
+        Observation object supplying geometry arrays and integrated radiance.
+    wl_range : tuple of float, optional
+        ``(lambda_min, lambda_max)`` wavelength interval in nm passed to
+        :meth:`~cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance`.
+        If *None*, the full bandpass is integrated.
+    alt_circles : sequence of float, optional
+        Altitudes in km at which dashed reference circles are drawn around
+        the apparent body disk.  Skipped when *None*.
+    cmap : str, default ``"plasma"``
+        Any Matplotlib-recognised colormap name.
+    vmin : float, optional
+        Lower bound of the colour scale.  Defaults to the minimum finite
+        value of the projected image.
+    vmax : float, optional
+        Upper bound of the colour scale.  Defaults to the maximum finite
+        value of the projected image.  When *vmax* is smaller than the
+        actual maximum, the colorbar is extended with an arrow cap.
+    levels : int, default 100
+        Number of contour levels passed to
+        :func:`~matplotlib.axes.Axes.tricontourf`.
+        Ignored when ``interpol=False``.
+    nx : int, default 20
+        Number of grid columns along the x axis (cross-equatorial direction).
+        Increase for finer spatial sampling at the cost of computation time.
+    ny : int, default 20
+        Number of grid rows along the y axis (latitudinal direction).
+        Increase for finer spatial sampling at the cost of computation time.
+    interpol : bool, default True
+        Rendering mode.
 
-    wl_range : tuple[float, float] or None, optional
-        Wavelength interval passed to ``obs.integrate_radiance``. If ``None``,
-        the full wavelength range is used (see :func:`cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance`).
+        ``True``
+            Use :func:`~matplotlib.axes.Axes.tricontourf` on valid grid
+            points only; gaps between pixel footprints are filled by
+            triangular interpolation.  May introduce artefacts near the
+            edges of the field of view when the grid is coarse.
 
-    alt_circles : sequence of float or None, optional
-        Altitudes (km) of dashed reference circles plotted around the apparent body
-        disk.
+        ``False``
+            Render the raw gridded image with
+            :func:`~matplotlib.axes.Axes.imshow`; masked cells appear blank.
 
-    cmap : str, optional
-        Matplotlib colormap name. Default is ``"plasma"``.
-
-    vmin, vmax : float or None, optional
-        Lower and upper color scale bounds. If ``None``, they are inferred from the
-        computed image.
-
-    levels : int, optional
-        Number of contour levels used when ``interpol=True``. Default is ``100``.
-
-    nx, ny : int, optional
-        Number of grid samples along the x and y axes of the projected map.
-        Defaults are ``20`` and ``20``.
-
-    interpol : bool, optional
-        If ``True``, render the map with ``Axes.tricontourf`` using valid grid
-        points only. If ``False``, render the gridded image directly with
-        ``Axes.imshow``. Default is ``True``.
-        Interpol is useful to fill the gaps between the pixels FOV, but it may produce artifacts if the grid is too coarse.
-
-    ax : matplotlib.axes.Axes or None, optional
-        Existing axes on which to draw. If ``None``, a new figure and axes are
-        created.
-
-    annotate : bool, optional
-        If ``True``, add colorbar, compass arrows, longitude label, pole marker,
-        and axis labels. If ``False``, axes are hidden and only the map/body outline
-        are drawn as a clean raw image.
-
-    xlim, ylim : tuple[float, float] or None, optional
-        Explicit x/y limits (km) for the projected grid. If ``None``, limits are
-        inferred from the projected pixel footprints.
+    ax : matplotlib.axes.Axes, optional
+        Axes on which to draw.  A new figure and axes are created when *None*.
+    annotate : bool, default True
+        If *True*, add a colorbar, a N/E compass, a pole marker, and axis
+        labels.  If *False*, the axes are hidden and only the radiance map
+        and the body outline are drawn (useful for publication figures).
+    xlim : tuple of float, optional
+        ``(x_min, x_max)`` extent in km of the projected grid along the
+        x axis.  Derived from the pixel footprints when *None*.
+    ylim : tuple of float, optional
+        ``(y_min, y_max)`` extent in km of the projected grid along the
+        y axis.  Derived from the pixel footprints when *None*.
 
     Returns
     -------
@@ -101,9 +110,11 @@ def UV_picture(
     -----
     - The body disk is drawn as an apparent ellipse derived from SPICE body radii
       and the sub-spacecraft latitude.
-    - A target-specific longitude convention is applied for Titan (x-axis flip).
+    - Y axis is defined by the LOS tangent point local time.
     - Pixel index 59 is skipped (instrument-specific exclusion).
     - Grid cells covered by multiple pixel footprints are averaged.
+    - The function should be used for observations where the spacecraft remains in a stable position relatively to the sun.
+      Image construction may be inaccurate for observations with rapidly changing geometry.
 
     See Also
     --------
@@ -123,37 +134,35 @@ def UV_picture(
     radii = spice.bodvrd(obs.target, 'RADII', 3)[1]
     spice.unload(str(pck))
 
-    r_p, r_e = radii[0], np.mean(radii[1:])
+    r_e, r_p = np.mean(radii[:2]), radii[2] # Equatorial and polar radii
 
     # Pixel coordinates
     from .computational import ellipsoid_radius
-    lats = obs.pixel_LOS["lat"]
-    lons = obs.pixel_LOS["lon"]
+    lats = obs.pixel_LOS["t_lat"]
+    lons = obs.pixel_LOS["t_lon"]
+    t_lt = obs.pixel_LOS["t_lt"]
     lt   = obs.pixel_LOS["lt"]
     alts = obs.pixel_LOS["alt"] + ellipsoid_radius(radii, lons, lats)
+
+    sol_lon = t_lt*360/24 # Angle to the sun
 
     xx = alts*np.cos(np.radians(lats))
     yy = alts*np.sin(np.radians(lats))
 
     
 
-    # Sort pixels left/right by longitude
-    sc_lon = np.mean(obs.sub_sc_point[:,0])
+    # Sort pixels left/right by local time
+    sc_lon = np.mean(obs.spacecraft_position['lt'])*360/24
     lon_1 = sc_lon-180
     if lon_1<0:
         mask = (
-            ((lons >= lon_1+360) & (lons < 0))     |
-            ((lons >= 0)         & (lons < sc_lon))
+            ((sol_lon >= lon_1+360) & (sol_lon < 360))    |
+            ((sol_lon >= 0)         & (sol_lon < sc_lon))
         )
         xx[mask] *= -1
     else:
-        mask = ((lons >= lon_1)  & (lons < sc_lon))
+        mask = ((sol_lon >= lon_1)  & (sol_lon < sc_lon))
         xx[mask] *= -1
-
-    # Invert longitude for Titan
-    if obs.target.upper() == 'TITAN':
-        xx*= -1
-
 
     # 2 - BUILD IMAGE
     #----------------
@@ -273,7 +282,7 @@ def UV_picture(
     # 4- MISCELLANEOUS ELEMENTS
     #--------------------------
     # Draw body's disk as apparent ellipse
-    sc_lat = np.mean(obs.sub_sc_point[:,1])
+    sc_lat = np.mean(obs.spacecraft_position['lat'])
 
     A = r_e
     B = np.sqrt(r_e*r_e*(np.sin(np.radians(sc_lat)))**2 + r_p*r_p*(np.cos(np.radians(sc_lat)))**2)
@@ -349,14 +358,6 @@ def UV_picture(
     dx = x1 - x0
     dy = y1 - y0
 
-    ax.text(
-        x0 + 0.03 * dx,
-        y0 + 0.03 * dy,
-        f"Longitude {np.mean(obs.sub_sc_point[:, 0]):.1f}°",
-        ha="left",
-        va="bottom",
-        bbox=text_box,
-    )
 
     # Pole marker
     phi = np.radians(sc_lat)

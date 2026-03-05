@@ -37,7 +37,7 @@ user_config/
 
 example/
 ├─ example.ipynb          Example workflow notebook
-└─ data/                  Small example data (if present)
+└─ data/                  Small example data
 ```
 
 
