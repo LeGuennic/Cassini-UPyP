@@ -92,6 +92,7 @@ class Geometry:
     The object can be created as a "main" geometry instance (responsible for kernel
     loading/clearing) or as a nested instance used for secondary targets in the
     field of view. In the latter case, the code uses recursion.
+    
 
     Parameters
     ----------

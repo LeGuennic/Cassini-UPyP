@@ -430,11 +430,17 @@ class Geometer:
         t_ems   = vec_angle(-LOS,          tangent_point)
         
         # Properties for intersection point with the surface
-        # (no difference if LOS is not looking at the disk)
-        tangent_point, found  = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=False)
-        tangent_point_to_sun = planet_to_sun_brf - tangent_point
+        # Start from tangent-point values as default
+        inter_point = tangent_point.copy()  # already computed with closest_point=True
+        inter_point_to_sun = tangent_point_to_sun.copy()
 
-        lons, lats, _ = ellipsoid_xyz(self.radii, tangent_point, units='degrees')
+        # Overwrite only where LOS actually hits the ellipsoid
+        hit_point, found = intersect(self.obs_from_planet_brf, LOS, self.radii, closest_point=False)
+        if np.any(found):
+            inter_point[found] = hit_point[found]
+            inter_point_to_sun[found] = planet_to_sun_brf - hit_point[found]
+
+        lons, lats, _ = ellipsoid_xyz(self.radii, inter_point, units='degrees')
 
 
 
@@ -448,9 +454,9 @@ class Geometer:
             lons   = 360-lons
             t_lons = 360-t_lons
             
-        sza   = vec_angle(tangent_point, tangent_point_to_sun)
-        phase = vec_angle(-LOS,          tangent_point_to_sun)
-        ems   = vec_angle(-LOS,          tangent_point)
+        sza   = vec_angle(inter_point, inter_point_to_sun)
+        phase = vec_angle(-LOS,        inter_point_to_sun)
+        ems   = vec_angle(-LOS,        inter_point)
 
 
         keys  = ['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt", "t_lon", "t_lat", "t_sza", "t_phase", "t_ems", "t_lt"]

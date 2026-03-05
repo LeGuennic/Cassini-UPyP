@@ -84,6 +84,8 @@ def plot(
     - **Overlay plot** (``ax`` is provided): the scene is drawn onto an existing axes without
       restyling or changing axis limits (unless your implementation explicitly does so).
 
+    The plot may be innacurate for observations with very far targets.
+
     Parameters
     ----------
     g_obj : geometry
@@ -301,7 +303,7 @@ def plot(
         ax.plot([g_obj.target_center[frame][0]], [g_obj.target_center[frame][1]], **plotconfig.TARGET_CENTER)
 
         # SUB-SPACECRAFT LATITUDE AND LONGITUDE
-        ax.annotate(f"{round(g_obj.sub_sc_lon)}° , {round(g_obj.sub_sc_lat)}°",
+        ax.annotate(f"{round(g_obj.spacecraft_position['lon'])}° , {round(g_obj.spacecraft_position['lat'])}°",
                     (g_obj.target_center[frame][0], g_obj.target_center[frame][1]), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=8)
 
         # PIXEL PARAMETERS (LOS PROPERTIES)

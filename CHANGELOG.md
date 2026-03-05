@@ -6,7 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+## [1.3.1] – 2025-03-05
 
+### Fixed
+- `LOS_tangent`: intersection geometry fields (`lon`, `lat`, `sza`, `phase`,
+  `ems`, `lt`) no longer return NaN for lines of sight that do not intersect
+  the ellipsoid; they now correctly fall back to the tangent-point values.
+- `plot`: sub-spacecraft longitude/latitude annotation now reads from
+  `spacecraft_position['lon'/'lat']` instead of the removed `sub_sc_lon`/`sub_sc_lat` attributes.
+
+### Documentation
+- Added a warning in `plot` docstring about potential inaccuracy for
+  observations with very distant targets.
+  
 ## [1.3.0] - 2026-02-18
 
 ### Added
