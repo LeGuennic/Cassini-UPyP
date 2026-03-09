@@ -1610,9 +1610,21 @@ class UVIS_Observation:
         ) / np.sqrt(SPATIAL_BIN * SPECTRA_BIN)
 
         self.evil_pixels_binned = np.isnan(sensitivity)
+
         # -- FINAL CALIBRATION
-        return {'calibration'       : 1/sensitivity,
-                'calibration_error' : sensitivity_error/(sensitivity**2)}
+        mask = np.isfinite(sensitivity) & np.isfinite(sensitivity_error) & (sensitivity>0) & (sensitivity_error>0)
+
+        calibration       = np.full_like(sensitivity, np.nan)
+        calibration_error = np.full_like(sensitivity_error, np.nan)
+
+        calibration[mask]       = 1/sensitivity[mask]
+        calibration_error[mask] = sensitivity_error[mask]/(sensitivity[mask]**2)
+
+        calibration[sensitivity==0] = np.nan
+        calibration_error[sensitivity==0] = np.nan
+        
+        return {'calibration'       : calibration,
+                'calibration_error' : calibration_error}
 
     def set_calibration(self, **kwargs) :
         """
@@ -1781,7 +1793,8 @@ class UVIS_Observation:
         if out_format=='gif':
             # Case: GIF – assemble all images in memory
             frames = []
-            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry animation"):
+            for i in tqdm(range(self.n_pics), total=self.n_pics, desc="Rendering geometry animation"):
+                obj = self.get_geometry(self.ET_middle[i])
                 buf = io.BytesIO()
                 obj.plot(save=True, savename=buf, **kwargs)
                 buf.seek(0)
@@ -1803,7 +1816,8 @@ class UVIS_Observation:
             print(f"GIF created : {gif_filename}")
         else :
             # Standard case: save each plot as an individual file
-            for i, obj in tqdm(enumerate(self.geometry), total=len(self.geometry), desc="Rendering geometry plots"):
+            for i in tqdm(range(self.n_pics), total=self.n_pics, desc="Rendering geometry plots"):
+                obj = self.get_geometry(self.ET_middle[i])
                 filename = folder / f"geometry_{i}.{out_format}"
                 obj.plot(save=True, savename=str(filename), show=False, **kwargs)
             
@@ -1943,232 +1957,296 @@ class UVIS_Observation:
 
     def check_stars(
             self,
-            cmap: str = 'gist_ncar',
-            color_scale: tuple[float, float] = (0,14),
-            wl_range: tuple[float, float]    = (1600,1900),
+            cmap: str = 'plasma',
+            wl_range: tuple[float, float] = (1600, 1900),
             method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid',
-            exp_range: tuple[int, int] = None
         ):
         """
-        Create a heatmap of integrated radiance similar to a chronophotography and highlight pixels affected by stars.
-        The heatmap is interactive for the user to identify pixels as contaminated (by stars, other objects, or
-        any pixel to remove from analysis).
+        Create an interactive heatmap of integrated radiance to identify and flag
+        pixels contaminated by stars or other artefacts.
+
+        The plot displays integrated radiance per (exposure, pixel) cell. Users can
+        click cells to toggle them as contaminated; selected cells are tracked in
+        ``self.pixel_stars`` and ``self.pixel_stars_mask``. Sliders allow real-time
+        adjustment of the color scale, exposure range, and colormap.
 
         Parameters
         ----------
         cmap : str, optional
-            Colormap to use for the heatmap. Default is 'gist_ncar'.
-        color_scale : tuple of float, optional
-            Color scale limits. Default is (0, 14).
+            Initial colormap. Default is ``'gist_ncar'``.
         wl_range : tuple of float, optional
-            Wavelength range for integration. Default is (1600, 1900) in angströms.
+            Wavelength bounds for radiance integration, in angströms.
+            Default is ``(1600, 1900)``.
         method : {'simpson', 'trapz', 'trapezoid'}, optional
-            Integration method to use. Default is 'simpson'.
-        exp_range : tuple of int, optional
-            Range of exposures to display (start, end). If None, all exposures are shown.
-
+            Numerical integration method. Default is ``'trapezoid'``.
+            
         See Also
         --------
-        :func:`cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance` : Compute integrated radiance used in this plot.
-        :func:`cassini_upyp.geometry.UV_picture.UV_picture` : Create a UV image of the observation.
+        :func:`cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance`
+        :func:`cassini_upyp.geometry.UV_picture.UV_picture`
         """
 
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-        from matplotlib.patches import Rectangle
         from matplotlib import pyplot as plt
+        from matplotlib.collections import PatchCollection
+        from matplotlib.patches import Rectangle
+        from matplotlib.widgets import Slider, RangeSlider, RadioButtons
 
-        integrated_radiance = self.integrate_radiance(wl_range=wl_range, method=method)
-        if exp_range is None:
-            exp0, exp1 = 0, self.n_pics
-        else:
-            exp0, exp1 = exp_range
-            exp0 = 0 if exp0 is None else int(exp0)
-            exp1 = self.n_pics if exp1 is None else int(exp1)
-            exp0 = max(0, min(self.n_pics, exp0))
-            exp1 = max(0, min(self.n_pics, exp1))
-            if exp1 <= exp0:
-                raise ValueError(f"Invalid exp_range={exp_range}. Expected (start, end) with 0 <= start < end <= {self.n_pics}.")
 
-        n_exp = exp1 - exp0
-        integrated_radiance = integrated_radiance[exp0:exp1, :]
-        X, Y = np.arange(n_exp + 1) - 0.5, np.arange(self.n_pixels + 1) - 0.5
+        cmap_options = [
+            'gist_ncar', 'viridis', 'plasma', 'inferno', 'magma',
+            'cividis', 'hot', 'coolwarm', 'turbo',
+        ]
 
-        fig     = plt.figure(figsize=(8, 6))
-        ax      = fig.add_axes([0.1, 0.1, 0.6, 0.8])
-        ax_text = fig.add_axes([0.75, 0.1, 0.2, 0.8])
+        # ── Data preparation (full range, view controlled by xlim) ────────
+        data = self.integrate_radiance(wl_range=wl_range, method=method)
+        # data shape: (n_pics, n_pixels)
+
+        data_min, data_max = float(np.nanmin(data)), float(np.nanmax(data))
+        vmin0, vmax0 = (data_min, data_max)
+
+        # Cell edge coordinates — x index = exposure number
+        X = np.arange(self.n_pics + 1) - 0.5
+        Y = np.arange(self.n_pixels + 1) - 0.5
+
+        # Initial view
+        view0, view1 = 0, self.n_pics
+
+        # ── Figure layout ─────────────────────────────────────────────────
+        fig = plt.figure(figsize=(10, 8))
+
+        ax      = fig.add_axes([0.08, 0.18, 0.52, 0.77])       # main heatmap
+        ax_cbar = fig.add_axes([0.615, 0.18, 0.005, 0.77])     # colorbar
+        ax_text = fig.add_axes([0.72, 0.18, 0.25, 0.77])       # selection panel
+        ax_exp  = fig.add_axes([0.1, 0.11, 0.52, 0.01])      # exposure range slider
+        ax_vmin = fig.add_axes([0.1, 0.07, 0.52, 0.01])      # vmin slider
+        ax_vmax = fig.add_axes([0.1, 0.03, 0.52, 0.01])      # vmax slider
         ax_text.axis('off')
 
+        # Colormap selector (compact ◀ label ▶)
+        ax_cmap_prev  = fig.add_axes([0.75, 0.08, 0.02, 0.02])
+        ax_cmap_label = fig.add_axes([0.77, 0.08, 0.13, 0.02])
+        ax_cmap_next  = fig.add_axes([0.90, 0.08, 0.02, 0.02])
+        ax_cmap_label.axis('off')
 
-        if color_scale is None :
-            mesh = ax.pcolormesh(X,Y, integrated_radiance.T, edgecolors='k', linewidth=0.5, cmap=cmap)
-        else :
-            mesh = ax.pcolormesh(X,Y, integrated_radiance.T, edgecolors='k', linewidth=0.5, cmap=cmap, vmin=color_scale[0], vmax=color_scale[1])
-
-        # Colorbar
-        divider = make_axes_locatable(ax)
-        cax = divider.append_axes("right", size=0.1, pad=0.15)
-        cbar = fig.colorbar(mesh, cax=cax)
+        # ── Heatmap + colorbar ────────────────────────────────────────────
+        mesh = ax.pcolormesh(
+            X, Y, data.T,
+            edgecolors='k', linewidth=0.5,
+            cmap=cmap, vmin=vmin0, vmax=vmax0,
+        )
+        cbar = fig.colorbar(mesh, cax=ax_cbar)
         cbar.set_label("Integrated radiance (kR)", rotation=270, labelpad=15)
 
-        # Ticks definition
-        if n_exp < 10:
-            xticks = np.arange(n_exp)
-        else:
-            xticks = np.arange(0, n_exp, step=2)
-        
-        yticks = np.arange(self.n_pixels)
-
-        ax.set_xticks(xticks)
-        ax.set_xticklabels(xticks + exp0)
-        ax.set_yticks(yticks)
+        ax.set_xlim(view0 - 0.5, view1 - 0.5)
+        ax.set_yticks(np.arange(self.n_pixels))
         ax.set_aspect('equal')
         ax.set_xlabel("Exposure Number")
         ax.set_ylabel("Pixel Number")
-        ax.set_zorder(2)
-        cax.set_zorder(1)
 
+        def _update_xticks():
+            """Set integer x-ticks adapted to the current view width."""
+            lo, hi = ax.get_xlim()
+            n_visible = int(hi - lo)
+            step = 1 if n_visible < 10 else max(1, n_visible // 10) * 2
+            start = int(np.ceil(lo + 0.5))
+            ticks = np.arange(start, int(hi + 0.5), step)
+            ax.set_xticks(ticks)
 
-        # ADD GEOMETRY INFO
-        if self.pixel_LOS is not None :
-            
-            # DISK
-            mask_ij = np.all(self.pixel_LOS[exp0:exp1, :]['alt'] < 0, axis=2)
-            for xuv, yuv in np.argwhere(mask_ij):
-                ax.plot([xuv], [yuv], color="#000000", ls='', marker='o', markersize=2)
-            
-            if np.any(self.pixel_star_geometry[exp0:exp1, :]['number']>0) :
-                index  = np.where((self.pixel_star_geometry[exp0:exp1, :]['number']>0)*(~self.pixel_star_geometry[exp0:exp1, :]['is_UV']))
-                result = list(zip(index[0], index[1]))
+        _update_xticks()
 
-                for xuv,yuv in result :
+        # ── Geometry overlays (static, full range) ────────────────────────
+        if self.pixel_LOS is not None:
+            # Disk pixels (altitude < 0 across all LOS points)
+            mask_disk = np.all(self.pixel_LOS['alt'] < 0, axis=2)
+            disk_ij = np.argwhere(mask_disk)
+            if disk_ij.size:
+                ax.scatter(disk_ij[:, 0], disk_ij[:, 1], c='black', s=4, zorder=3)
 
-                    rect = Rectangle((xuv - 0.5, yuv - 0.5), 1, 1, 
-                     edgecolor='yellow', linewidth=1, facecolor='none')
-                    ax.add_patch(rect)
-        
-        # INTERACTION HANDLES
-        for (row, col) in self.pixel_stars:
-            if not (exp0 <= col < exp1):
-                continue
-            col_local = col - exp0
-            x_center = (X[col_local] + X[col_local+1]) / 2
-            y_center = (Y[row] + Y[row+1]) / 2
-            line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
-            self.markers[(row, col)] = line
-        text_handle = ax_text.text(0, 1, "Selected pixels:\n", va='top', fontsize=10,family='monospace')
+            # Star geometry flags (non-UV only)
+            star_geo = self.pixel_star_geometry
+            mask_star = (star_geo['number'] > 0) & (~star_geo['is_UV'])
+            star_ij = np.argwhere(mask_star)
+            if star_ij.size:
+                rects = [Rectangle((x - 0.5, y - 0.5), 1, 1) for x, y in star_ij]
+                ax.add_collection(PatchCollection(
+                    rects, edgecolors='yellow', facecolors='none', linewidths=1,
+                ))
 
+        # ── Click markers (single scatter, updated in-place) ─────────────
+        marker_scatter = ax.scatter(
+            [], [], marker='x', c='black', s=64, linewidths=2, zorder=4,
+        )
 
+        def _refresh_markers():
+            """Recompute scatter offsets from self.pixel_stars."""
+            pts = [(col, row) for row, col in self.pixel_stars]
+            marker_scatter.set_offsets(pts if pts else np.empty((0, 2)))
 
-        def update_text():
-            header = f"{'Pixel':>6} {'Exposure':>10}\n"
-            if self.pixel_stars:
-                lines = "\n".join(f"{int(row):>6} {int(col):>10}" for row, col in self.pixel_stars)
-                text_str = "Selected pixels:\n"  + header + lines
-            else:
-                text_str = "Selected pixels:\n"+ header
-            
-            text_handle.set_text(text_str)
-            plt.draw()
+        _refresh_markers()
 
-        def add_marker(row, col):
-            if not (exp0 <= col < exp1):
+        # ── Selection text panel ──────────────────────────────────────────
+        text_handle = ax_text.text(0, 1, "", va='top', fontsize=10, family='monospace')
+
+        def _refresh_text():
+            header = f"Selected pixels:\n{'Pixel':>6} {'Exposure':>10}\n"
+            lines = "\n".join(f"{r:>6} {c:>10}" for r, c in self.pixel_stars)
+            text_handle.set_text(header + lines)
+
+        _refresh_text()
+
+        # ── Widgets ───────────────────────────────────────────────────────
+
+        # Exposure range
+        slider_exp = RangeSlider(
+            ax_exp, 'Exposures', 0, self.n_pics,
+            valinit=(view0, view1), valstep=1
+        )
+
+        def _on_exp_change(val):
+            lo, hi = int(val[0]), int(val[1])
+            if lo >= hi:
                 return
-            col_local = col - exp0
-            x_center = (X[col_local] + X[col_local+1]) / 2
-            y_center = (Y[row] + Y[row+1]) / 2
-            line, = ax.plot(x_center, y_center, marker='x', color='black', markersize=8, mew=2)
-            self.markers[(row, col)] = line
+            ax.set_xlim(lo - 0.5, hi - 0.5)
+            _update_xticks()
+            fig.canvas.draw_idle()
 
-        def remove_marker(row, col):
-            if (row, col) in self.markers:
-                self.markers[(row, col)].remove()
-                del self.markers[(row, col)]
+        slider_exp.on_changed(_on_exp_change)
 
-        def on_click(event):
-            if event.inaxes == ax:
-                x_click = event.xdata
-                y_click = event.ydata
+        # Color scale
+        slider_vmin = Slider(ax_vmin, 'vmin', data_min, data_max, valinit=vmin0, color="#3C3C3C")
+        slider_vmax = Slider(ax_vmax, 'vmax', data_min, data_max*1.5, valinit=vmax0, color='#3C3C3C')
 
-                col_local = np.searchsorted(X, x_click) - 1
-                row = np.searchsorted(Y, y_click) - 1
-                if not (0 <= row < self.n_pixels and 0 <= col_local < n_exp):
-                    return
-                col = col_local + exp0
+        def _on_clim_change(_val):
+            if slider_vmin.val < slider_vmax.val:
+                mesh.set_clim(slider_vmin.val, slider_vmax.val)
+                fig.canvas.draw_idle()
 
-                if (row, col) in self.pixel_stars:
-                    self.pixel_stars.remove((row, col))
-                    self.pixel_stars_mask[col, row] = False
-                    remove_marker(row, col)
-                else:
-                    self.pixel_stars.append((row, col))
-                    self.pixel_stars_mask[col, row] = True
-                    add_marker(row, col)
+        slider_vmin.on_changed(_on_clim_change)
+        slider_vmax.on_changed(_on_clim_change)
 
-                update_text()
+        # Colormap selector
+        from matplotlib.widgets import Button
+        btn_prev = Button(ax_cmap_prev, '\u25C0')
+        btn_next = Button(ax_cmap_next, '\u25B6')
+        cmap_idx = [cmap_options.index(cmap) if cmap in cmap_options else 0]
+        cmap_label = ax_cmap_label.text(
+            0.5, 0.5, cmap_options[cmap_idx[0]],
+            ha='center', va='center', fontsize=10, family='monospace',
+        )
 
-        hover_annotation = ax.annotate(
+        def _cycle_cmap(step):
+            cmap_idx[0] = (cmap_idx[0] + step) % len(cmap_options)
+            name = cmap_options[cmap_idx[0]]
+            mesh.set_cmap(name)
+            cmap_label.set_text(name)
+            fig.canvas.draw_idle()
+
+        btn_prev.on_clicked(lambda _: _cycle_cmap(-1))
+        btn_next.on_clicked(lambda _: _cycle_cmap(+1))
+
+        # Prevent garbage collection
+        self._check_stars_widgets = (
+            slider_exp, slider_vmin, slider_vmax, btn_prev, btn_next,
+        )
+
+        # ── Hover tooltip (blitting for performance) ──────────────────────
+        hover = ax.annotate(
             "", xy=(0, 0), xytext=(15, 15),
             textcoords="offset points",
             bbox=dict(boxstyle="round", fc="w"),
             arrowprops=dict(arrowstyle="->"),
-            fontfamily="monospace"
+            fontfamily="monospace",
+            animated=True,
         )
-        hover_annotation.set_visible(False)
+        hover.set_visible(False)
+        _bg = [None]
 
-        def on_hover(event):
-            # Vérifie si la souris est dans la zone de l’axe principal
-            if event.inaxes == ax:
-                x_hover = event.xdata
-                y_hover = event.ydata
+        def _on_draw(_event):
+            """Capture clean background after every full redraw."""
+            _bg[0] = fig.canvas.copy_from_bbox(fig.bbox)
 
-                # Trouver l’indice du pixel survolé
-                col_local = np.searchsorted(X, x_hover) - 1
-                row = np.searchsorted(Y, y_hover) - 1
+        def _build_hover_text(exp, pix):
+            """Format the tooltip string for a given cell."""
+            val = data[exp, pix]
 
-                # Vérifier qu’on est bien dans la grille
-                if 0 <= row < self.n_pixels and 0 <= col_local < n_exp:
-                    col = col_local + exp0
-                    # Exemple: récupérer la valeur du signal
-                    pixel_value = integrated_radiance[col_local, row]
+            if self.pixel_LOS is None:
+                return (
+                    f"Pixel: {pix}   Exposure: {exp}\n"
+                    f"Signal: {val:.2f} kR"
+                )
 
-                    # Construire la chaîne de texte à afficher
-                    if self.pixel_LOS is None:
-                        text = (
-                            f"Pixel: {row},  Exposure: {col}\n"
-                            f"Signal: {pixel_value:.2f} kR"
-                        )
-                    else:
-                        alt_center, alt_min, alt_max=self.pixel_LOS[col,row,0]['alt'], min(self.pixel_LOS[col,row,:]['alt']), max(self.pixel_LOS[col,row,:]['alt'])
-                        text = (
-                            f"Pixel      : {row},  Exposure: {col}\n"
-                            f"Signal     : {pixel_value:.2f} kR\n"
-                            f"Altitude   : {alt_center:.0f} km ({alt_min:.0f} km <-> {alt_max:.0f} km)\n"
-                            f"Local time : {self.pixel_LOS[col,row,0]['lt']:.1f}\n"
-                            f"SZA        : {self.pixel_LOS[col,row,0]['sza']:.1f}°\n"
-                            f"Latitude   : {self.pixel_LOS[col,row,0]['lat']:.1f}°\n"
-                        )
+            los = self.pixel_LOS[exp, pix]
+            alt_c = los[0]['alt']
+            alt_lo, alt_hi = min(los[:]['alt']), max(los[:]['alt'])
+            return (
+                f"Pixel      : {pix}   Exposure: {exp}\n"
+                f"Signal     : {val:.2f} kR\n"
+                f"Altitude   : {alt_c:.0f} km ({alt_lo:.0f} <-> {alt_hi:.0f} km)\n"
+                f"Local time : {los[0]['lt']:.1f}\n"
+                f"SZA        : {los[0]['sza']:.1f}\u00b0\n"
+                f"Latitude   : {los[0]['lat']:.1f}\u00b0"
+            )
 
-                    # Mise à jour de l’annotation
-                    hover_annotation.xy = (col_local, row)
-                    hover_annotation.set_text(text)
-                    hover_annotation.set_visible(True)
-                    # Redessiner la figure
-                    plt.draw()
-                else:
-                    hover_annotation.set_visible(False)
-                    plt.draw()
+        def _blit_hover():
+            if _bg[0] is None:
+                return
+            fig.canvas.restore_region(_bg[0])
+            ax.draw_artist(hover)
+            fig.canvas.blit(fig.bbox)
+
+        def _cell_from_event(event):
+            """Return (exposure, pixel) indices from a mouse event, or None."""
+            if event.inaxes != ax or event.xdata is None:
+                return None
+            exp = int(np.searchsorted(X, event.xdata)) - 1
+            pix = int(np.searchsorted(Y, event.ydata)) - 1
+            if 0 <= exp < self.n_pics and 0 <= pix < self.n_pixels:
+                return exp, pix
+            return None
+
+        def _on_hover(event):
+            if _bg[0] is None:
+                return
+
+            cell = _cell_from_event(event)
+            if cell is None:
+                if hover.get_visible():
+                    hover.set_visible(False)
+                    _blit_hover()
+                return
+
+            exp, pix = cell
+            hover.xy = (exp, pix)
+            hover.set_text(_build_hover_text(exp, pix))
+            hover.set_visible(True)
+            _blit_hover()
+
+        # ── Click handler ─────────────────────────────────────────────────
+        def _on_click(event):
+            cell = _cell_from_event(event)
+            if cell is None:
+                return
+
+            pix, exp = cell[1], cell[0]     # (row, col) = (pixel, exposure)
+
+            if (pix, exp) in self.pixel_stars:
+                self.pixel_stars.remove((pix, exp))
+                self.pixel_stars_mask[exp, pix] = False
             else:
-                # Si la souris est hors de l'axe, on cache l’annotation
-                hover_annotation.set_visible(False)
-                plt.draw()
+                self.pixel_stars.append((pix, exp))
+                self.pixel_stars_mask[exp, pix] = True
 
+            _refresh_markers()
+            _refresh_text()
+            fig.canvas.draw_idle()
 
-        # Connect callbacks
-        fig.canvas.mpl_connect('motion_notify_event', on_hover)
-        fig.canvas.mpl_connect('button_press_event', on_click)
-        update_text()
+        # ── Connect events and show ───────────────────────────────────────
+        fig.canvas.mpl_connect('draw_event', _on_draw)
+        fig.canvas.mpl_connect('motion_notify_event', _on_hover)
+        fig.canvas.mpl_connect('button_press_event', _on_click)
         plt.show()
-    
+
+
     def save_stars(self, filepath: str | Path) -> str:
         """
         Save the list of stellar-contaminated pixels to a text file.

@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+
+## [1.3.2] — 2026-03-09
+
+### Fixed
+
+- **Calibration** (`uvisdata.py`): Division by zero and invalid values in the
+  calibration array are now handled explicitly instead of raising warnings.
+
+- **Geometry plotting** (`uvisdata.py`): Replaced `enumerate(self.geometry)`
+  with index-based iteration using `get_geometry(ET_middle[i])` in both the GIF
+  and per-file rendering paths, because now there is no precomputed geometry list.
+
+### Changed
+
+- **`check_stars()` — interactive UI overhaul** (`uvisdata.py`):
+  - `color_scale` and `exp_range` parameters removed; their functionality is
+    now exposed as real-time **interactive sliders** (vmin / vmax / exposure
+    range) directly on the figure.
+  - Added a **colormap selector** (◀ / ▶ cycle buttons) with nine presets
+    (`gist_ncar`, `viridis`, `plasma`, `inferno`, `magma`, `cividis`, `hot`,
+    `coolwarm`, `turbo`). Default changed from `'gist_ncar'` to `'plasma'`.
+  - Hover tooltip rewritten with **blitting** (`animated=True` +
+    `copy_from_bbox` / `restore_region`) for significantly better rendering
+    performance on large datasets.
+  - Tooltip and click handlers refactored into small, focused helpers
+    (`_build_hover_text`, `_cell_from_event`, `_blit_hover`, `_on_click`,
+    `_on_hover`). Widget references kept on `self._check_stars_widgets` to
+    prevent garbage collection.
+  - Figure layout adjusted to `(10, 8)` with explicitly positioned axes for
+    the heatmap, colorbar, selection panel, and slider strip.
+  - Docstring updated to reflect the new interactive workflow and removed
+    `color_scale` / `exp_range` from the parameter table.
+
+
 ## [1.3.1] – 2025-03-05
 
 ### Fixed
