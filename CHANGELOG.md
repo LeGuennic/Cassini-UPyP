@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+
+## [1.3.3] — 2026-03-10
+
+### Fixed
+Sub-spacecraft altitude calculation: the `alt` field in `spacecraft_position` is now correctly returning the spacecraft's altitude above the ellipsoid, and not the subspacecraft point's altitude that was just zero.
+
 ## [1.3.2] — 2026-03-09
 
 ### Fixed

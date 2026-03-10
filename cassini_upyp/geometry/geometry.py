@@ -295,34 +295,9 @@ class Geometry:
 
 
             # Spacecraft position
-            # planet_to_sun_brf,_ = spice.spkpos('SUN', self.ET, 'IAU_' + self.target, 'LT+S', self.target)
-            
-            # self.sub_sc_lon, self.sub_sc_lat, self.sc_altitude = ellipsoid_xyz(self.geo_engine.radii, self.geo_engine.obs_from_planet_brf)
-            # sc_point  = ellipsoid_coords(self.geo_engine.radii, self.sub_sc_lon, self.sub_sc_lat)
-            # sc_point_to_sun = planet_to_sun_brf - sc_point
-            # if self.target =='TITAN' : self.sub_sc_lon = 2*np.pi-self.sub_sc_lon
-
-            # self.sub_sc_lat = np.degrees(self.sub_sc_lat)
-            # self.sub_sc_lon = np.mod(np.degrees(self.sub_sc_lon), 360)
-
-
-            # # Similar to Geometer.LOS_tangent
-            # # Since the LOS is aiming at the center we avoid computing the intersection and numerical errors.
-            # sza   = vec_angle(sc_point, sc_point_to_sun)
-            # phase = vec_angle(self.geo_engine.obs_from_planet_brf,     sc_point_to_sun)
-            # ems   = 0
-            # sub_solar_longitude, _, _ = ellipsoid_xyz(self.geo_engine.radii, planet_to_sun_brf, units='degrees')
-            # lst = 12.0 + (self.sub_sc_lon - sub_solar_longitude) * (24.0 / 360.0)
-            # lst = lst % 24.0
-
-            # keys  = ['lon', 'lat', 'alt', 'sza', 'phase', 'ems', "lt"]
-            # param = [ self.sub_sc_lon,  self.sub_sc_lat,  self.sc_altitude,  sza,   phase,   ems,   lst]
-            # dtype = [(k,float) for k in keys]
-            # self.spacecraft_position = np.zeros(1, dtype=dtype)
-            # for k, p in zip(keys, param):
-            #     self.spacecraft_position[k] = p
 
             self.spacecraft_position = self.geo_engine.LOS_tangent([self.geo_engine.planet_from_obs_j2k])[0]
+            _,_,self.spacecraft_position['alt'] = ellipsoid_xyz(self.geo_engine.radii, self.geo_engine.obs_from_planet_brf)
 
 
             # Sun position

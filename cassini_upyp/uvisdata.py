@@ -2002,7 +2002,7 @@ class UVIS_Observation:
         # data shape: (n_pics, n_pixels)
 
         data_min, data_max = float(np.nanmin(data)), float(np.nanmax(data))
-        vmin0, vmax0 = (data_min, data_max)
+        vmin0, vmax0 = (0, data_max)
 
         # Cell edge coordinates — x index = exposure number
         X = np.arange(self.n_pics + 1) - 0.5
