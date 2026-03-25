@@ -30,18 +30,28 @@ def UV_picture(
         ylim: tuple[float, float] | None = None
     ):
     """
-    Build and plot a projected UV radiance image.
+    Build and plot a projected UV radiance image in the plane of sky.
 
-    Each UVIS pixel footprint is projected onto a regular grid using the
-    tangent-point geometry of its four corners (local time, latitude, altitude).
-    Grid cells covered by several footprints are averaged; cells with no
-    coverage are masked.  The result is rendered either as a contour fill
-    (``interpol=True``) or as a raw grid image (``interpol=False``).
+    For each exposure, pixel unit vectors (J2000) are projected onto a tangent
+    plane centred on the target body.  The plane axes are defined geometrically:
+    the y axis is the projection of the north-pole direction onto the image
+    plane (computed via SPICE body-fixed → J2000 rotation), and the x axis is
+    the cross product of y with the observer–target unit vector, then negated so
+    that right ascension increases to the left (standard sky orientation).
+    Frame-to-frame sign continuity of the y axis is enforced to prevent axis
+    flips across exposures.
+
+    Projected pixel footprints are rasterised onto a regular grid; cells covered
+    by multiple footprints are averaged, cells with no coverage are masked.  The
+    result is rendered as a contour fill (``interpol=True``) or as a raw grid
+    image (``interpol=False``).
 
     Parameters
     ----------
     obs : UVIS_Observation
         Observation object supplying geometry arrays and integrated radiance.
+        Must expose ``used_pixels['XYZ']``, ``target_vector``, ``ET_middle``,
+        and ``spacecraft_position``.
     wl_range : tuple of float, optional
         ``(lambda_min, lambda_max)`` wavelength interval in nm passed to
         :meth:`~cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance`.
@@ -63,11 +73,11 @@ def UV_picture(
         :func:`~matplotlib.axes.Axes.tricontourf`.
         Ignored when ``interpol=False``.
     nx : int, default 20
-        Number of grid columns along the x axis (cross-equatorial direction).
-        Increase for finer spatial sampling at the cost of computation time.
+        Number of grid columns along the x axis (plane-of-sky horizontal,
+        east–west direction).
     ny : int, default 20
-        Number of grid rows along the y axis (latitudinal direction).
-        Increase for finer spatial sampling at the cost of computation time.
+        Number of grid rows along the y axis (plane-of-sky vertical,
+        north–south direction).
     interpol : bool, default True
         Rendering mode.
 
@@ -104,25 +114,34 @@ def UV_picture(
     Raises
     ------
     ValueError
-        If no valid projected radiance values are available.
+        If no valid projected radiance values are available after gridding.
 
     Notes
     -----
+    - Pixel coordinates are computed by projecting J2000 unit vectors onto the
+      tangent plane at distance *D* (observer–target distance) using a
+      perspective divide: ``x_proj = D * dot(v, x̂) / dot(v, ĉ)``, where ``ĉ``
+      is the observer–target unit vector.  Rays with ``dot(v, ĉ) ≤ 0`` (pointing
+      away from the target plane) are rejected and set to NaN.
+    - The image axes are aligned with the body's rotational pole: y points toward
+      the north pole projected on the sky, x points east (right ascension
+      decreases to the right).
     - The body disk is drawn as an apparent ellipse derived from SPICE body radii
-      and the sub-spacecraft latitude.
-    - Y axis is defined by the LOS tangent point local time.
-    - Pixel index 59 is skipped (instrument-specific exclusion).
-    - Grid cells covered by multiple pixel footprints are averaged.
-    - The function should be used for observations where the spacecraft remains in a stable position relatively to the sun.
-      Image construction may be inaccurate for observations with rapidly changing geometry.
+      and the mean sub-spacecraft latitude.
+    - Pixel 59 is unconditionally excluded (known instrumental artefact).
+    - Grid cells covered by multiple pixel footprints are averaged (uniform
+      weighting).
+    - Best suited for observations where the spacecraft geometry does not change
+      rapidly; the projection is computed independently per frame and averaged on
+      the grid, which may introduce blurring for long or fast-moving observations.
 
     See Also
     --------
     :func:`cassini_upyp.uvisdata.UVIS_Observation.check_stars`
     """
-
     # 1 - PREPARE DATA
     #-----------------
+    et_range = obs.ET_middle
 
 
     # Get body radius
@@ -132,37 +151,58 @@ def UV_picture(
 
     spice.furnsh(str(pck))
     radii = spice.bodvrd(obs.target, 'RADII', 3)[1]
+    pole_N = []
+    for et in et_range:
+        rotation = spice.pxform('IAU_'+obs.target.upper(), 'J2000', et)
+        pole_N.append(rotation[:, 2])
     spice.unload(str(pck))
+    pole_N = np.array(pole_N)
 
     r_e, r_p = np.mean(radii[:2]), radii[2] # Equatorial and polar radii
 
-    # Pixel coordinates
-    from .computational import ellipsoid_radius
-    lats = obs.pixel_LOS["t_lat"]
-    lons = obs.pixel_LOS["t_lon"]
-    t_lt = obs.pixel_LOS["t_lt"]
-    lt   = obs.pixel_LOS["lt"]
-    alts = obs.pixel_LOS["alt"] + ellipsoid_radius(radii, lons, lats)
+    # 1.5 - PIXEL COORDINATES
+    #------------------------
+    n_frames = obs.target_vector.shape[0]
+    xx = np.full(obs.used_pixels['XYZ'].shape[:-1], np.nan, dtype=float)
+    yy = np.full(obs.used_pixels['XYZ'].shape[:-1], np.nan, dtype=float)
 
-    sol_lon = t_lt*360/24 # Angle to the sun
+    prev_y = None
+    for i in range(n_frames):
+        D = np.linalg.norm(obs.target_vector[i])   # Distance to center
+        c = obs.target_vector[i]/D                 # Observer - target unit vector
+        n = pole_N[i] / np.linalg.norm(pole_N[i])  # North pole unit vector
 
-    xx = alts*np.cos(np.radians(lats))
-    yy = alts*np.sin(np.radians(lats))
+        # North projected onto the image plane
+        y = n - np.dot(n, c) * c
+        y /= np.linalg.norm(y)
 
-    
+        # Keep a stable sign from one frame to the next
+        if prev_y is not None and np.dot(y, prev_y) < 0:
+            y *= -1.0
+        prev_y = y.copy()
 
-    # Sort pixels left/right by local time
-    sc_lon = np.mean(obs.spacecraft_position['lt'])*360/24
-    lon_1 = sc_lon-180
-    if lon_1<0:
-        mask = (
-            ((sol_lon >= lon_1+360) & (sol_lon < 360))    |
-            ((sol_lon >= 0)         & (sol_lon < sc_lon))
-        )
-        xx[mask] *= -1
-    else:
-        mask = ((sol_lon >= lon_1)  & (sol_lon < sc_lon))
-        xx[mask] *= -1
+        x = np.cross(y, c)
+        x /= np.linalg.norm(x)
+
+        
+        # Projection onto the plane at distance D
+        v = obs.used_pixels['XYZ'][i]                   # Pixel vectors
+        v /= np.linalg.norm(v, axis=-1, keepdims=True)
+
+        cos = np.dot(v, c)
+        xx_i = D * np.dot(v, x) / cos
+        yy_i = D * np.dot(v, y) / cos
+
+        # Reject rays pointing away from the target plane
+        xx_i[cos <= 0] = np.nan
+        yy_i[cos <= 0] = np.nan
+
+        xx[i] = xx_i
+        yy[i] = yy_i
+
+    # Invert right ascension to have a real picture
+    xx=-xx
+
 
     # 2 - BUILD IMAGE
     #----------------
@@ -279,8 +319,8 @@ def UV_picture(
 
 
 
-    # 4- MISCELLANEOUS ELEMENTS
-    #--------------------------
+    # 4 - MISCELLANEOUS ELEMENTS
+    #---------------------------
     # Draw body's disk as apparent ellipse
     sc_lat = np.mean(obs.spacecraft_position['lat'])
 

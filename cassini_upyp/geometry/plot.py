@@ -34,6 +34,7 @@ def plot_pixels(pixels, ax=None, **kwargs) :
         ax.plot(line[0], line[1], **kwargs)
 
         # Right side
+        
         line = np.array((p[2,:], p[3,:])).T
         ax.plot(line[0], line[1], **kwargs)
 

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.4] - 2026-02-18
+ 
+### Fixed
+ 
+- **`UV_picture`**: Completely overhauled the pixel coordinate projection. The
+  previous implementation projected pixels using tangent-point local time and
+  latitude, which was geometrically incorrect for off-equator geometries. Pixels
+  are now projected onto the plane of sky via perspective division of J2000 unit
+  vectors, with axes defined by the body's north pole direction (retrieved from
+  SPICE at each frame) and the observer–target vector.
+ 
+### Added
+ 
+- **`UVIS_Observation.set_geometry`**: Now stores two new attributes required by
+  the updated `UV_picture` that also can be usefull for other analyses:
+  - `used_pixels` — pixel corner pointing vectors in J2000 (`"XYZ"`) and
+    equatorial (`"RADEC"`) coordinates, shape `(n_pics, n_pixels, 5, 3)`.
+  - `target_vector` — observer-to-target position vector in J2000 (km), shape
+    `(n_pics, 3)`.
+ 
+- **`UVIS_Observation.check_stars`**: Added `vmax` parameter to cap the upper
+  bound of the vmax slider range (useful when a small number of bright pixels
+  would otherwise compress the colour scale for the rest of the observation).
+ 
+### Changed
+ 
+- **`UVIS_Observation.check_stars`**: Integrated radiance is now displayed in
+  rayleighs (R) instead of kilorayleighs (kR) for better readability at typical
+  airglow signal levels. The colorbar label and hover tooltip are updated
+  accordingly.
+ 
+- **`UVIS_Bin.__init__`**: Scalar attributes (`int`, `float`, `str`) are now
+  copied from the parent `UVIS_Observation` via a generic loop over
+  `vars(uvis_obs)`, replacing the previous explicit copies of `name`,
+  `slit_width`, `slit_dlambda`, and `HD`. New scalar attributes added to
+  `UVIS_Observation` in the future will be propagated to `UVIS_Bin`
+  automatically.
 
 ## [1.3.3] — 2026-03-10
 

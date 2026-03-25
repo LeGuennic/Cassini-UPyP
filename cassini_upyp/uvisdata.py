@@ -507,14 +507,44 @@ class UVIS_Bin:
     The class is agnostic to how bins are constructed: bins may result from
     automatic geometric binning or explicit manual pixel grouping.
 
+    All scalar attributes (``int``, ``float``, ``str``) of the parent
+    ``uvis_obs`` are copied onto this instance at construction time, so
+    instrument metadata such as ``name``, ``slit_width``, ``slit_dlambda``,
+    ``HD``, and any other scalar property are directly accessible without
+    going through the parent object.
+
     Parameters
     ----------
     shape : tuple of int
         Shape of the bin grid. Each element corresponds to the number of bins
         along one binning dimension. For manual binning this is typically
-        (n_bins,).
+        ``(n_bins,)``.
     uvis_obs : UVIS_Observation
-        Parent observation providing the unbinned data arrays and geometry.
+        Parent observation providing the unbinned data arrays, geometry, and
+        scalar metadata.
+
+    Attributes
+    ----------
+    bins : list_ndarray, shape *shape*
+        List-of-pairs array mapping each bin index to its constituent
+        ``(i_pic, i_pixel)`` pairs.
+    bin_def : dict or None
+        Bin boundary definitions (set by the binning routine, ``None`` for
+        manual binning).
+    number_per_bin : ndarray of int, shape *shape*
+        Number of pixels assigned to each bin.
+    pixel_LOS : ndarray
+        Copy of ``uvis_obs.pixel_LOS``.
+    bin_LOS : ndarray, shape *shape*
+        Per-bin LOS geometry (NaN until populated by a binning routine).
+    data : ndarray
+        Copy of ``uvis_obs.data`` (calibrated radiance, kR).
+    uncertainty_sup : ndarray
+        Copy of ``uvis_obs.uncertainty_sup``.
+    uncertainty_inf : ndarray
+        Copy of ``uvis_obs.uncertainty_inf``.
+    WL : ndarray
+        Copy of ``uvis_obs.WL`` (wavelength grid, Å).
     """
 
 
@@ -528,16 +558,16 @@ class UVIS_Bin:
         self.pixel_LOS = np.copy(uvis_obs.pixel_LOS)
         self.bin_LOS   = np.full_like(self.bins, fill_value=np.nan, dtype=uvis_obs.pixel_LOS.dtype)
 
+        # Observation properties
+        for key, value in vars(uvis_obs).items():
+            if isinstance(value, (int, float, str)):
+                setattr(self, key, value)
+
         # Unbinned data
-        self.name = uvis_obs.name
         self.data = np.copy(uvis_obs.data)
         self.uncertainty_sup = np.copy(uvis_obs.uncertainty_sup)
         self.uncertainty_inf = np.copy(uvis_obs.uncertainty_inf)
         self.WL = np.copy(uvis_obs.WL)
-
-        self.slit_width = uvis_obs.slit_width
-        self.slit_dlambda = uvis_obs.slit_dlambda
-        self.HD = uvis_obs.HD
 
         self.bin_averaged   = False
         self.bin_integrated = False
@@ -1029,6 +1059,27 @@ class UVIS_Observation:
         Shape: (n_pics, n_pixels, 5) for each field.
         The last dimension corresponds to the pixel center,
         bottom-left, bottom-right, upper-right, and upper-left corners, respectively.
+    pixel_LOS : numpy.ndarray or None
+            Structured array of line-of-sight geometry per pixel and exposure.
+            Fields: ``"lon"`` [°], ``"lat"`` [°], ``"alt"`` [km],
+            ``"sza"`` [°], ``"phase"`` [°], ``"ems"`` [°], ``"lt"`` [h].
+            Shape: (n_pics, n_pixels, 5) for each field.
+            The last dimension corresponds to the pixel center,
+            bottom-left, bottom-right, upper-right, and upper-left corners, respectively.
+    used_pixels : dict or None
+        Pixel pointing vectors in two coordinate systems.
+        Populated by :meth:`set_geometry()`.
+
+        ``"XYZ"`` : ndarray, shape (n_pics, n_pixels, 4, 3)
+            Cartesian unit vectors in J2000 frame for the 4 corners of each pixel.
+        ``"RADEC"`` : ndarray, shape (n_pics, n_pixels, 4, 3)
+            Right ascension and declination (radians) of the same corner vectors.
+
+    target_vector : numpy.ndarray or None
+        Observer-to-target position vector in J2000 (km) at each frame mid-point.
+        Shape: (n_pics, 3). Populated by :meth:`set_geometry()`.
+        Used by :func:`~cassini_upyp.geometry.UV_picture.UV_picture` for the
+        plane-of-sky projection.
     spacecraft_position : numpy.ndarray or None
         Sub-spacecraft point properties in planetocentric coordinates (shape: (n_pics,)
         Fields: ``"lon"`` [°], ``"lat"`` [°], ``"alt"`` [km],
@@ -1706,26 +1757,63 @@ class UVIS_Observation:
 
     def set_geometry(self, et_range: ArrayLike = None, **kwargs) :
         """
-        Compute and set geometry for a range of exposures.
+        Compute and store observation geometry for a sequence of exposures.
+
+        Iterates over *et_range*, calls :meth:`get_geometry` for each ephemeris
+        time, and assembles the per-frame results into array attributes on the
+        observation object.  After this call, all geometry-dependent methods
+        (projection, star flagging, UV picture …) become available.
 
         Parameters
         ----------
-        et_range : array_like, optional
-            Array of ephemeris times for which to compute geometry. If None, the middle time of each exposure is used.
+        et_range : array_like of float, optional
+            Ephemeris times (TDB seconds past J2000) at which geometry is
+            evaluated.  Defaults to ``self.ET_middle`` (mid-exposure times).
         **kwargs
-            Additional keyword arguments passed to the geometry computation.
+            Forwarded verbatim to :meth:`get_geometry`.
 
-        Notes
-        -----
-        This method updates the geometry attribute and computes the mean heliocentric distance (HD)
-        and line-of-sight pixel data.
+        Attributes set
+        --------------
+        HD : float
+            Mean heliocentric distance over all exposures (AU).
+        spacecraft_position : ndarray, shape (n_frames,)
+            Structured array of spacecraft position parameters per frame.
+        pixel_LOS : ndarray, shape (n_frames, n_pixels)
+            Structured array of line-of-sight tangent-point parameters for
+            each used pixel and frame.
+        used_pixels : dict
+            Pixel pointing vectors in two coordinate systems, each an array
+            of shape ``(n_frames, n_pixels, 4, 3)`` (4 corners per pixel):
+
+            ``"XYZ"``
+                Cartesian unit vectors in J2000.
+            ``"RADEC"``
+                Right ascension and declination (radians) of the same vectors.
+
+        target_vector : ndarray, shape (n_frames, 3)
+            Observer-to-target position vector in J2000 (km) at each frame,
+            used for the plane-of-sky projection in :func:`UV_picture`.
+        pixel_star_geometry : ndarray, shape (n_frames, n_pixels), structured
+            Per-pixel star-contamination information with fields:
+
+            ``MAG`` (float)
+                Visual magnitude of the brightest star in the pixel FOV.
+            ``is_UV`` (bool)
+                Whether the star has a significant UV flux.
+            ``number`` (int)
+                Catalogue index of the contaminating star (−1 if none).
+            ``on_disk`` (bool)
+                Whether the star falls behind the target body disk.
         """
         
         self.spacecraft_position = []
         HD        = []
         pixel_LOS = []
         pixel_star = []
+        used_pixels=[]
         n_used_pixels = []
+
+        self.target_vector = []
         if et_range is None : et_range = self.ET_middle
 
         for i in tqdm(range(len(et_range)), desc="Computing geometry", file=sys.stdout):#, ncols=100) :
@@ -1735,15 +1823,26 @@ class UVIS_Observation:
             self.spacecraft_position.append(g.spacecraft_position)
             pixel_LOS.append(g.used_pixels_LOS)
             pixel_star.append(g.pixel_stars)
+            used_pixels.append(g.used_pixels)
+
+            self.target_vector.append(g.geo_engine.planet_from_obs_j2k)
 
             n_used_pixels.append(g.n_used_pixels)
-        
 
         self.HD = np.mean(HD)
         self.spacecraft_position = np.array(self.spacecraft_position)
         self.pixel_LOS = np.array(pixel_LOS)
+
+        # Used pixels vectors
+        self.used_pixels = {
+            "XYZ"   : np.array([e['XYZ'] for e in used_pixels]),
+            "RADEC" : np.array([e['RADEC'] for e in used_pixels])
+        }
+        self.target_vector = np.array(self.target_vector)
+
         
 
+        # Pixel star
         dtype = np.dtype([
             ('MAG',     float),
             ('is_UV',   bool ),
@@ -1960,29 +2059,37 @@ class UVIS_Observation:
             cmap: str = 'plasma',
             wl_range: tuple[float, float] = (1600, 1900),
             method: Literal['simpson', 'trapz', 'trapezoid'] = 'trapezoid',
+            vmax=None
         ):
         """
         Create an interactive heatmap of integrated radiance to identify and flag
         pixels contaminated by stars or other artefacts.
 
-        The plot displays integrated radiance per (exposure, pixel) cell. Users can
-        click cells to toggle them as contaminated; selected cells are tracked in
-        ``self.pixel_stars`` and ``self.pixel_stars_mask``. Sliders allow real-time
-        adjustment of the color scale, exposure range, and colormap.
+        The plot displays integrated radiance (in rayleighs) per (exposure, pixel)
+        cell.  Users can click cells to toggle them as contaminated; selected cells
+        are tracked in ``self.pixel_stars`` and ``self.pixel_stars_mask``.  Sliders
+        allow real-time adjustment of the colour scale and exposure range; a
+        colormap cycling widget is also provided.
 
         Parameters
         ----------
         cmap : str, optional
-            Initial colormap. Default is ``'gist_ncar'``.
+            Initial colormap name.  Must be a valid Matplotlib colormap.
+            Default is ``'plasma'``.
         wl_range : tuple of float, optional
-            Wavelength bounds for radiance integration, in angströms.
+            Wavelength bounds for radiance integration, in ångströms.
             Default is ``(1600, 1900)``.
         method : {'simpson', 'trapz', 'trapezoid'}, optional
-            Numerical integration method. Default is ``'trapezoid'``.
-            
+            Numerical integration method passed to :meth:`integrate_radiance`.
+            Default is ``'trapezoid'``.
+        vmax : float, optional
+            Upper bound of the vmax slider range.  When provided, the slider is
+            initialised at *vmax* and its upper limit is capped to *vmax*.
+            When *None* (default), the upper limit is set to ``1.5 × data_max``.
+
         See Also
         --------
-        :func:`cassini_upyp.uvisdata.UVIS_Observation.integrate_radiance`
+        :meth:`integrate_radiance`
         :func:`cassini_upyp.geometry.UV_picture.UV_picture`
         """
 
@@ -1998,11 +2105,12 @@ class UVIS_Observation:
         ]
 
         # ── Data preparation (full range, view controlled by xlim) ────────
-        data = self.integrate_radiance(wl_range=wl_range, method=method)
+        data = self.integrate_radiance(wl_range=wl_range, method=method)*1e3 # Convert from kR to rayleighs
         # data shape: (n_pics, n_pixels)
 
         data_min, data_max = float(np.nanmin(data)), float(np.nanmax(data))
         vmin0, vmax0 = (0, data_max)
+
 
         # Cell edge coordinates — x index = exposure number
         X = np.arange(self.n_pics + 1) - 0.5
@@ -2035,7 +2143,7 @@ class UVIS_Observation:
             cmap=cmap, vmin=vmin0, vmax=vmax0,
         )
         cbar = fig.colorbar(mesh, cax=ax_cbar)
-        cbar.set_label("Integrated radiance (kR)", rotation=270, labelpad=15)
+        cbar.set_label("Integrated radiance (R)", rotation=270, labelpad=15)
 
         ax.set_xlim(view0 - 0.5, view1 - 0.5)
         ax.set_yticks(np.arange(self.n_pixels))
@@ -2114,8 +2222,10 @@ class UVIS_Observation:
 
         # Color scale
         slider_vmin = Slider(ax_vmin, 'vmin', data_min, data_max, valinit=vmin0, color="#3C3C3C")
-        slider_vmax = Slider(ax_vmax, 'vmax', data_min, data_max*1.5, valinit=vmax0, color='#3C3C3C')
-
+        if vmax is None:
+            slider_vmax = Slider(ax_vmax, 'vmax', data_min, data_max*1.5, valinit=vmax0, color='#3C3C3C')
+        else:
+            slider_vmax = Slider(ax_vmax, 'vmax', data_min, vmax,         valinit=vmax,  color='#3C3C3C')
         def _on_clim_change(_val):
             if slider_vmin.val < slider_vmax.val:
                 mesh.set_clim(slider_vmin.val, slider_vmax.val)
@@ -2180,7 +2290,7 @@ class UVIS_Observation:
             alt_lo, alt_hi = min(los[:]['alt']), max(los[:]['alt'])
             return (
                 f"Pixel      : {pix}   Exposure: {exp}\n"
-                f"Signal     : {val:.2f} kR\n"
+                f"Signal     : {val:.2f} R\n"
                 f"Altitude   : {alt_c:.0f} km ({alt_lo:.0f} <-> {alt_hi:.0f} km)\n"
                 f"Local time : {los[0]['lt']:.1f}\n"
                 f"SZA        : {los[0]['sza']:.1f}\u00b0\n"

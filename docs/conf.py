@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT))
 
 project = "Cassini-UPyP"
 author = "Nathan Le Guennic"
-release = "1.3.3"
+release = "1.3.4"
 
 # -- General configuration ---------------------------------------------------
 
