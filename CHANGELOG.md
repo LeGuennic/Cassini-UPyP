@@ -7,7 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.3.4] - 2026-02-18
+## [1.4.0] - 2026-06-03
+
+### Added
+
+- **`UVIS_Bin.average`**: Weighted dispersion statistics are now computed
+  alongside the unweighted ones, using the generalized (reliability-weights)
+  Bessel correction:
+  - per-wavelength spectra `bin_stddev_w_spectrum` and `bin_stderr_w_spectrum`;
+  - integrated quantities `binned_integrated_data_w`, `bin_stddev_w` and
+    `bin_stderr_w`.
+
+### Changed
+
+- **`UVIS_Observation.bin_pixels`**: default `keys` reordered to
+  `('lt', 'lat', 'alt')` (with the matching default `bin_boundaries`). This
+  changes the order of the output bin dimensions for callers that relied on the
+  previous default ordering.
+- Example notebook and PDF updated.
+
+### Fixed
+
+- **`UVIS_Observation.bin_pixels`**: the `modulo` argument is now forwarded to
+  `find_bin_index`, so cyclic dimensions are handled correctly (it was
+  previously ignored).
+- **Background estimation** (`UVIS_Observation`): when no background pixels are
+  available above the altitude limit, the method now returns `(nan, nan)` with
+  an explicit message instead of failing on an empty array.
+- **Pixel corruption detection**: pixels with strictly positive counts on every
+  wavelength are skipped early, avoiding needless processing.
+- **`max_gap`** (`background.py`): guards against an empty threshold array
+  (falls back to `n_wl`) instead of raising `IndexError`.
+- **`save` docstring** (`UVIS_Observation`): corrected to reflect the `.uvis`
+  extension and the removal of the `fullsave` parameter (it still referenced a
+  `.pkl` file and a removed keyword).
+- **`CITATION.cff`**: removed a duplicate `title` key.
+- **Documentation**: fixed the editable-install extras command
+  (`pip install -e ".[plot,qt]"`) and pointed the README example-notebook links
+  to `main` instead of a frozen commit.
+
+## [1.3.4] - 2026-03-25
  
 ### Fixed
  
@@ -83,7 +122,7 @@ Sub-spacecraft altitude calculation: the `alt` field in `spacecraft_position` is
     `color_scale` / `exp_range` from the parameter table.
 
 
-## [1.3.1] – 2025-03-05
+## [1.3.1] – 2026-03-05
 
 ### Fixed
 - `LOS_tangent`: intersection geometry fields (`lon`, `lat`, `sza`, `phase`,
@@ -96,7 +135,7 @@ Sub-spacecraft altitude calculation: the `alt` field in `spacecraft_position` is
 - Added a warning in `plot` docstring about potential inaccuracy for
   observations with very distant targets.
   
-## [1.3.0] - 2026-02-18
+## [1.3.0] - 2026-03-05
 
 ### Added
 - `CHANGELOG.md`: initial changelog covering all versions from pre-versioning to 1.3.0

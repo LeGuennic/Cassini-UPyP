@@ -267,7 +267,8 @@ def max_gap(bg_level, integration_time, n_wl=1024, SPECTRAL_BIN=1, SPATIAL_BIN=1
     N = bg_level * integration_time * n_wl * SPATIAL_BIN * SPECTRAL_BIN
     h = gap_histogram(N, L=n_wl)
     mu_ge = np.cumsum(h[::-1])[::-1]
-    m_thr = np.where(mu_ge <= alpha)[0][0]
+    indices = np.where(mu_ge <= alpha)[0]
+    m_thr = int(indices[0]) if len(indices) > 0 else n_wl
 
     return m_thr
 

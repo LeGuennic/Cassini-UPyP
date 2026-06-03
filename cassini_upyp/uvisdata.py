@@ -1,5 +1,8 @@
 from __future__ import annotations
-from typing import Literal, Iterable
+from typing import TYPE_CHECKING, Literal, Iterable
+
+if TYPE_CHECKING:
+    from .geometry import Geometry
 from numpy.typing import ArrayLike
 from collections.abc import Sequence
 
@@ -621,6 +624,8 @@ class UVIS_Bin:
         self.bin_wmean_spectrum  = np.full(out_shape, np.nan, dtype=float)
         self.bin_u_sup_spectrum  = np.full(out_shape, np.nan, dtype=float)
         self.bin_u_inf_spectrum  = np.full(out_shape, np.nan, dtype=float)
+        self.bin_stddev_w_spectrum = np.full(out_shape, np.nan, dtype=float)
+        self.bin_stderr_w_spectrum = np.full(out_shape, np.nan, dtype=float)
 
         for idx in np.ndindex(bin_shape):
             pairs = self.bins[idx]
@@ -648,16 +653,33 @@ class UVIS_Bin:
             combined_unc = 0.5 * (stacked_sup + stacked_inf)
             weights      = 1.0 / np.square(combined_unc)
 
-            w_sum        = weights.sum(axis=0)
+            V1 = weights.sum(axis=0)
             w_data_sum   = (stacked_data * weights).sum(axis=0)
 
             # Weighted mean (avoid division by zero where w_sum==0)
             self.bin_wmean_spectrum[idx] = np.divide(
-                w_data_sum, w_sum,
+                w_data_sum, V1,
                 out=np.full(self.WL.shape, np.nan),
-                where=(w_sum>0)
+                where=(V1>0)
             )
 
+            # 3.5 Weighted stddev and stderr
+
+            if N>1 :
+            
+                # Generalized Bessel correction
+                V2 = (weights**2).sum(axis=0)
+                A  = V1 / (V1**2 - V2)
+                # Weighted variance
+                B = np.sum(weights * np.square(stacked_data - self.bin_wmean_spectrum[idx]), axis=0)
+
+                self.bin_stddev_w_spectrum[idx] = np.sqrt(A*B)
+                self.bin_stderr_w_spectrum[idx] = self.bin_stddev_w_spectrum[idx] * np.sqrt(V2) / V1
+                self.bin_stderr_w_spectrum[idx] *= correction
+            else :
+                self.bin_stddev_w_spectrum[idx] = np.zeros_like(self.WL)
+                self.bin_stderr_w_spectrum[idx] = np.zeros_like(self.WL)
+            
             # 4) Propagate separate upper/lower uncertainties
             inv_sup_sq = 1.0 / np.square(stacked_sup)
             inv_inf_sq = 1.0 / np.square(stacked_inf)
@@ -748,10 +770,13 @@ class UVIS_Bin:
 
         # Average integrated arrays
         self.binned_integrated_data            = np.full(self.bins.shape, np.nan, dtype=float)
+        self.binned_integrated_data_w          = np.full(self.bins.shape, np.nan, dtype=float)
         self.binned_integrated_uncertainty_sup = np.full(self.bins.shape, np.nan, dtype=float)
         self.binned_integrated_uncertainty_inf = np.full(self.bins.shape, np.nan, dtype=float)
         self.bin_stddev                        = np.full(self.bins.shape, np.nan, dtype=float)
         self.bin_stderr                        = np.full(self.bins.shape, np.nan, dtype=float)
+        self.bin_stddev_w                      = np.full(self.bins.shape, np.nan, dtype=float)
+        self.bin_stderr_w                      = np.full(self.bins.shape, np.nan, dtype=float)
 
         for idx in np.ndindex(self.bins.shape):
             
@@ -760,17 +785,32 @@ class UVIS_Bin:
 
             N = len(pairs)
 
-            self.binned_integrated_data[idx] = np.mean([self.integrated_data[i, j] for (i, j) in pairs])
+            data_arr  = np.array([self.integrated_data[i, j] for (i, j) in pairs])
+            sigma_arr = np.array([0.5*(self.integrated_uncertainty_sup[i, j] + self.integrated_uncertainty_inf[i, j]) for (i, j) in pairs])
+            weights   = 1.0 / sigma_arr**2
 
+            V1 = np.sum(weights)
+            V2 = np.sum(weights**2)
+
+            self.binned_integrated_data[idx]   = np.mean(data_arr)
+            self.binned_integrated_data_w[idx] = np.sum(data_arr * weights) / V1
             if N>1:
                 correction = correction_factor(N)
 
-                self.bin_stddev[idx]             = np.std ([self.integrated_data[i, j] for (i, j) in pairs], ddof=1)
-                self.bin_stderr[idx]             = correction * self.bin_stddev[idx] / np.sqrt(N)
+                self.bin_stddev[idx] = np.std (data_arr, ddof=1)
+                self.bin_stderr[idx] = correction * self.bin_stddev[idx] / np.sqrt(N)
+
+
+                A = V1 / (V1**2 - V2)
+                B = np.sum(weights * np.square(data_arr - self.binned_integrated_data_w[idx]))
+                self.bin_stddev_w[idx] = np.sqrt(A*B)
+                self.bin_stderr_w[idx] = correction * self.bin_stddev_w[idx] * np.sqrt(V2) / V1
 
             else:
-                self.bin_stddev[idx]             = 0
-                self.bin_stderr[idx]             = 0
+                self.bin_stddev[idx] = 0
+                self.bin_stderr[idx] = 0
+                self.bin_stddev_w[idx] = 0
+                self.bin_stderr_w[idx] = 0
 
             self.binned_integrated_uncertainty_sup[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_sup[i, j]**2 for (i, j) in pairs]))
             self.binned_integrated_uncertainty_inf[idx] = np.sqrt(1/np.sum([1/self.integrated_uncertainty_inf[i, j]**2 for (i, j) in pairs]))
@@ -1735,7 +1775,7 @@ class UVIS_Observation:
 
 
     # -------- GEOMETRY
-    def get_geometry(self, ET:float, **kwargs) -> 'Geometry':
+    def get_geometry(self, ET:float, **kwargs) -> Geometry:
         """
         Compute the geometry for a given ephemeris time.
 
@@ -2446,6 +2486,11 @@ class UVIS_Observation:
         bg_pixels = self.counts[(MinPixAlt>alt_limit) * ~self.pixel_corrupted * ~self.pixel_stars_mask, :]
         bg_pixels = bg_pixels[:, (self.WL>=wl_range[0]) * (self.WL<=wl_range[1])]
         bg_pixels = bg_pixels[np.any(bg_pixels, axis=1)] # Filter total transmission losses
+
+        if bg_pixels.shape[0] == 0:
+            print(f'No background pixels available above {alt_limit} km, please manually set a background level.')
+            return np.nan, np.nan
+
         counts_per_pixel = np.sum(bg_pixels, axis=1)
 
 
@@ -2467,6 +2512,8 @@ class UVIS_Observation:
         if self.max_gap <10 and self.spat_bin>1 : self.max_gap = 100
         for i_pic in range(self.counts.shape[0]) :
             for i_spat in range(self.counts.shape[1]) :
+
+                if np.all(self.counts[i_pic,i_spat, :] > 0) : continue
 
                 # Total losses
                 if not np.any(self.counts[i_pic,i_spat, :]) :
@@ -2561,11 +2608,11 @@ class UVIS_Observation:
     def bin_pixels(
         self,
         pixels: Sequence[Sequence[int]] | Sequence[Sequence[Sequence[int]]] | None = None,
-        keys: tuple[str, ...] = ('lat', 'alt','lt'),
+        keys: tuple[str, ...] = ('lt', 'lat', 'alt'),
         bin_boundaries: tuple[Sequence[float], ...] = (
+            [0,12,24],
             default_lat_bins,
-            default_alt_bins,
-            [0,12,24]
+            default_alt_bins
         ),
         mode: Literal['center', 'all'] = 'center',
         modulo: float | None = None,
@@ -2716,7 +2763,7 @@ class UVIS_Observation:
                     
                     # Determine the bin index for each property.
                     for dim_idx, prop in enumerate(pixel_properties):
-                        idx = find_bin_index(prop, bin_boundaries[dim_idx], mode)
+                        idx = find_bin_index(prop, bin_boundaries[dim_idx], mode, modulo=modulo)
                         if idx is None:
                             valid = False
                             break
@@ -2781,14 +2828,13 @@ class UVIS_Observation:
     # -------- SAVE MANAGMENT
     def save(self, filepath: str = None, overwrite: bool = False):
         """
-        Saves the current UVIS_Observation instance to a pickle (.pkl) file.
-        The object is save without self.geometry attribute unless keyword fullsave
-        is set.
+        Saves the current UVIS_Observation instance to a ``.uvis`` file
+        (serialized with the ``pickle`` module).
 
         Parameters
         ----------
         filepath  : str, optional
-            Path of the output file. Defaults to "<self.name>.pkl".
+            Path of the output file. Defaults to "<self.name>.uvis".
         overwrite : bool, optional
             If True, overwrites an existing file without asking.
             Defaults to False.

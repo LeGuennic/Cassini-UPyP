@@ -26,4 +26,4 @@ From the repository root:
 
 Optional dependencies (recommended):
 
-`python -m pip install -e ".[plot][qt]"`
+`python -m pip install -e ".[plot,qt]"`
