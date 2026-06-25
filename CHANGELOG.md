@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.1] - 2026-06-25
+
+### Changed
+
+- **`geometry.plot()` — `show` parameter removed** (API change): the function no
+  longer calls `plt.show()` itself; the caller is now responsible for displaying
+  the figure, in line with the matplotlib convention. Replace `g.plot(show=True)`
+  with `g.plot()` followed by `plt.show()`, and simply drop `show=False`. This
+  makes `plot()` usable as a normal building block inside a user-managed subplot,
+  e.g.:
+
+  ```python
+  fig, (ax_geom, ax) = plt.subplots(1, 2, figsize=(12, 12))
+  g.plot(ax=ax_geom)
+  ax.plot(s0, alt, label='AM')
+  ax.legend()
+  plt.show()
+  ```
+
+### Fixed
+
+- **`geometry.plot()`**: when an axes is passed for the main target
+  (`g.plot(ax=...)`), the axes is now styled and framed (facecolor, equal aspect,
+  hidden ticks, computed limits and inverted RA/DEC axis) just like a top-level
+  plot. Previously the ranges were computed but never applied, so matplotlib
+  autoscaled over all content (background stars, RA/DEC lines), breaking both the
+  framing and the aspect ratio in subplots. Secondary bodies drawn recursively
+  still inherit the parent framing and leave the parent axes untouched
+  (`invert_xaxis()` runs exactly once per axes).
+- **`geometry.plot()`** (`mode='manual'`): the missing-`DEC_range` error now reads
+  "valid DEC range" instead of mistakenly reporting "valid RA range".
+
 ## [1.4.0] - 2026-06-03
 
 ### Added

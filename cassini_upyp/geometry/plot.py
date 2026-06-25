@@ -56,7 +56,6 @@ def plot(
     *,
     save: bool = False,
     savename: str | Path | None = None,
-    show: bool = True,
 
     scale: float = 0.6,
     RA_range  : tuple[float, float] | None = None,
@@ -82,8 +81,13 @@ def plot(
     - **Top-level plot** (``ax`` is None, ``g_obj.main`` is True):
       a new figure/axes is created and styled; axis limits
       are set automatically from ``mode`` and ``scale`` (unless user ranges are provided).
-    - **Overlay plot** (``ax`` is provided): the scene is drawn onto an existing axes without
-      restyling or changing axis limits (unless your implementation explicitly does so).
+    - **Main-target overlay** (``ax`` is provided, ``g_obj.main`` is True): the scene is drawn
+      onto the caller's axes, which is also styled and framed (facecolor, equal aspect, ticks
+      removed, limits and inverted RA/DEC axis) so it behaves like a top-level plot inside a
+      subplot. The caller is responsible for calling ``plt.show()``.
+    - **Secondary-body overlay** (recursive call, ``g_obj.main`` is False): the body is drawn
+      onto the parent axes, which is left untouched (no restyling, no limit changes); it
+      inherits the parent framing.
 
     The plot may be innacurate for observations with very far targets.
 
@@ -108,8 +112,6 @@ def plot(
         If True, save the figure to ``savename`` (only meaningful for a top-level plot).
     savename : str or pathlib.Path or os.PathLike or None, default=None
         Output path for saving. Must be provided (or set by the caller) when ``save=True``.
-    show : bool, default=True
-        Whether to show the figure.
     scale : float, default=0.6
         Scale factor applied when computing automatic ranges in ``'FOV'`` mode (and possibly
         other modes depending on the implementation).
@@ -143,15 +145,19 @@ def plot(
 
     
     frame = 'ORF' if mode in ['target', 'FOV', 'manual'] else 'RADEC'
-    
+
     # SETUP AXES ---------------------------------------
+    # Resolve view center, rotation and default ranges. Runs only when this object
+    # owns the framing: a freshly created axes, or the main target (even when drawn
+    # on a caller-provided axes). Secondary bodies plotted recursively on a parent
+    # axes skip this block entirely and inherit the parent framing.
     if (ax is None) or g_obj.main :
-        
+
         match mode:
             case 'target' :
                 orf_center = (g_obj.target_center['RADEC'][0] , g_obj.target_center['RADEC'][1])
                 g_obj.rotate(view_center=orf_center)
-                
+
                 if RA_range is None and DEC_range is None  :
                     # Fix target disk in frame
                     RA_range  = min(g_obj.target_limb['ORF'][:,0])*2, max(g_obj.target_limb['ORF'][:,0])*2
@@ -171,27 +177,24 @@ def plot(
                     DEC_range = -FOV_size*scale, FOV_size*scale
                 elif (RA_range is None) or (DEC_range is None):
                     raise ValueError("If you pass RA_range or DEC_range, you must pass both.")
-            
+
             case 'allsky' :
                 RA_range, DEC_range = (0,360), (-90,90)
             case 'manual' :
                 if orf_center is None : raise ValueError('Manual mode requires a (RA/DEC) central position')
                 if RA_range   is None : raise ValueError('Manual mode requires a valid RA range to plot')
-                if DEC_range  is None : raise ValueError('Manual mode requires a valid RA range to plot')
+                if DEC_range  is None : raise ValueError('Manual mode requires a valid DEC range to plot')
                 g_obj.rotate(view_center=orf_center)
-    
-    ax_created = False
-    if ax is None :
-        ax_created = True
-        fig, ax = plt.subplots(figsize=(5,5))
-        ax.set_facecolor(plotconfig.BACKGROUND_COLOR)
-        ax.set_aspect('equal')
 
-        ax.set_xticks([])
-        ax.set_yticks([])
-    else:
+    # Create the axes if none was provided; otherwise reuse the caller's.
+    ax_created = ax is None
+    if ax_created :
+        fig, ax = plt.subplots(figsize=(5,5))
+    else :
         fig = ax.figure
-    
+
+    # Resolve framing: explicit ranges (user-provided or computed above) drive the
+    # limits; otherwise fall back to the current axes limits (recursive sub-bodies).
     if RA_range is not None and DEC_range is not None:
         xmin, xmax = RA_range
         ymin, ymax = DEC_range
@@ -199,9 +202,18 @@ def plot(
         xmin, xmax = ax.get_xlim()
         ymin, ymax = ax.get_ylim()
 
-    if ax_created:
-        ax.set_xlim(xmin,xmax)
-        ax.set_ylim(ymin,ymax)
+    # Style and frame the axes only when this object owns them (same condition as
+    # the centering block above). This is what makes `g.plot(ax=...)` work in a
+    # subplot for the main target, while recursive sub-bodies leave the parent axes
+    # untouched. invert_xaxis() therefore runs exactly once per axes.
+    if ax_created or g_obj.main :
+        ax.set_facecolor(plotconfig.BACKGROUND_COLOR)
+        ax.set_aspect('equal')
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
         if frame in ("RADEC", "ORF"):
             ax.invert_xaxis()
     # ------------------------------------
@@ -273,7 +285,7 @@ def plot(
                                 ls='', marker='o', ms = 5, color=plotconfig.PLANET_STYLE['DEFAULT']['limb']['color'], zorder=t2.zorder)
 
                     continue
-                else : t2.plot(mode=mode, ax=ax, show=False, save=False)
+                else : t2.plot(mode=mode, ax=ax, save=False)
 
 
         # LONGITUDE AND LATITUDE LINES
@@ -355,8 +367,6 @@ def plot(
                 bbox=dict(facecolor='white', alpha=0.3, boxstyle='round,pad=0.2'),
                 zorder=100000
             )
-        if show :
-            plt.show()
         if save :
             fig.tight_layout()
             if savename is None :

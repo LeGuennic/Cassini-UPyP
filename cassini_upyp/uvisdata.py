@@ -1958,7 +1958,7 @@ class UVIS_Observation:
             for i in tqdm(range(self.n_pics), total=self.n_pics, desc="Rendering geometry plots"):
                 obj = self.get_geometry(self.ET_middle[i])
                 filename = folder / f"geometry_{i}.{out_format}"
-                obj.plot(save=True, savename=str(filename), show=False, **kwargs)
+                obj.plot(save=True, savename=str(filename), **kwargs)
             
             plt.close('all')
 
