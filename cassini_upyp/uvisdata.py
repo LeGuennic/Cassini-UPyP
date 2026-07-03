@@ -565,6 +565,7 @@ class UVIS_Bin:
         for key, value in vars(uvis_obs).items():
             if isinstance(value, (int, float, str)):
                 setattr(self, key, value)
+        self.spacecraft_position = np.copy(uvis_obs.spacecraft_position)
 
         # Unbinned data
         self.data = np.copy(uvis_obs.data)

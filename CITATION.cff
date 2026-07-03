@@ -6,7 +6,7 @@ authors:
   - family-names: "Le Guennic"
     given-names: "Nathan"
     orcid: "https://orcid.org/0009-0006-7268-815X"
-version: 1.4.1
-date-released: 2026-06-25
+version: 1.4.2
+date-released: 2026-07-03
 url: "https://github.com/LeGuennic/Cassini-UPyP"
 license: MIT

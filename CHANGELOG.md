@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.2] - 2026-07-03
+
+### Added
+
+- **`UVIS_Bin.spacecraft_position`**: the spacecraft position array is now copied
+  from the parent `UVIS_Observation` onto the bin.
+
 ## [1.4.1] - 2026-06-25
 
 ### Changed
